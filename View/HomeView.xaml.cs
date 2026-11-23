@@ -1,0 +1,356 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.Remoting.Activation;
+using System.Threading;                         // [MỚI] cho CancellationTokenSource
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Net.NetworkInformation;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+namespace Project_check_URL.View
+{
+    public class DetailRequestedEventArgs : EventArgs
+    {
+        public string Url { get; set; }
+        public List<CheckItem> Items { get; set; }
+    }
+    public class CheckItem : INotifyPropertyChanged
+    {
+        private string _finding, _level;
+
+        public string Criterion { get; set; }
+
+        public string Finding
+        {
+            get { return _finding; }
+            set { _finding = value; OnPropertyChanged(); }
+        }
+
+        public string Level
+        {
+            get { return _level; }
+            set { _level = value; OnPropertyChanged(); }
+        }
+
+        public event PropertyChangedEventHandler PropertyChanged;
+
+        private void OnPropertyChanged([CallerMemberName] string name = null)
+            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+    }
+
+
+    public partial class HomeView : UserControl
+    {
+        private API_request _api;     // tạo lười, lần quét đầu tiên
+        private int _checkId;         // đánh số mỗi lần kiểm tra, để bỏ kết quả cũ
+
+        private API_request GetApi()
+        {
+            if (_api == null)
+            {
+                string key = "326f31e0c1cd810509de12b95c48924202583fc52178dd26ce7e475d442fda9c";
+                _api = new API_request(key);
+            }
+            return _api;
+        }
+        public event EventHandler<DetailRequestedEventArgs> DetailRequested;
+
+        private string _lastUrl;
+        private List<CheckItem> _lastItems;
+
+        private bool _checking;   // đang đợi kiểm tra mạng
+
+        private CancellationTokenSource _netCts;   // [MỚI] dùng để chống rung (debounce)
+        private CancellationTokenSource _scanCts;
+
+        // True when the switch is ON (online checks allowed)
+        private bool OnlineMode => OnlineToggle.IsChecked == true;
+
+        public HomeView()
+        {
+            InitializeComponent();
+
+            string path = System.IO.Path.Combine(
+                AppDomain.CurrentDomain.BaseDirectory, "Data", "confusables.txt");
+            Offline_check.LoadConfusables(path);
+
+            Loaded += (s, e) =>
+            {
+                NetworkChange.NetworkAvailabilityChanged += OnNetworkChanged;
+                NetworkChange.NetworkAddressChanged += OnNetworkAddressChanged;
+            };
+            Unloaded += (s, e) =>
+            {
+                NetworkChange.NetworkAvailabilityChanged -= OnNetworkChanged;
+                NetworkChange.NetworkAddressChanged -= OnNetworkAddressChanged;
+                _netCts?.Cancel();
+            };
+
+            _ = RefreshNetworkAsync();  
+        }
+
+        private void SetChecking(bool busy)
+        {
+            _checking = busy;
+            CheckingSpinner.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+            OnlineToggle.IsEnabled = !busy;
+            if (busy)
+            {
+                OnlineToggle.Content = "Checking...";
+                StatusText.Text = "Checking connection...";
+            }
+        }
+
+        //
+        private async Task RefreshNetworkAsync()
+        {
+            if (_checking) return;
+            SetChecking(true);
+
+            bool online = false;
+            try
+            {
+                online = await Check_Internet.IsOnlineAsync();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("Error: " + ex);
+            }
+            finally
+            {
+                SetChecking(false);
+            }
+
+            OnlineToggle.IsChecked = online;
+            ApplyNetworkState();            
+            StatusText.Text = "Ready";
+        }
+
+        
+        private void OnNetworkChanged(object sender, NetworkAvailabilityEventArgs e)
+            => _ = DebouncedRefreshAsync();
+
+        private void OnNetworkAddressChanged(object sender, EventArgs e)
+            => _ = DebouncedRefreshAsync();
+        private async Task DebouncedRefreshAsync()
+        {
+            _netCts?.Cancel();
+            _netCts = new CancellationTokenSource();
+            var token = _netCts.Token;
+
+            try
+            {
+                await Task.Delay(1500, token);
+                await Dispatcher.InvokeAsync(() => RefreshNetworkAsync()).Task.Unwrap();
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("Network refresh: " + ex.Message);
+            }
+        }
+
+        private void ApplyNetworkState()
+        {
+            bool on = OnlineMode;
+            OnlineToggle.Content = on ? "Online" : "Offline";
+            OnlineCard.Opacity = on ? 1.0 : 0.45;
+            Onl_history.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+        }
+        private void OnlineToggle_Changed(object sender, RoutedEventArgs e)
+        {
+            if (OnlineCard == null || Onl_history == null
+                || OnlineToggle == null || _checking) return;
+
+            ApplyNetworkState();
+        }
+
+        private async void CheckButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (_checking)
+            {
+                StatusText.Text = "Checking connection, please wait...";
+                return;
+            }
+
+            string input = LinkTextBox.Text.Trim();
+            if (!Uri.TryCreate(input, UriKind.Absolute, out Uri uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                MessageBox.Show("Please enter a valid URL, example: https://example.com");
+                return;
+            }
+
+            int myId = ++_checkId;
+            // Offline check
+            List<CheckFinding> homograph = Offline_check.CheckHomograph(uri);
+            string domainLevel = homograph.Any(f => f.Level == "Danger") ? "Danger" :
+                                 homograph.Any(f => f.Level == "Warning") ? "Warning" :
+                                 "Safe";
+
+            var items = new List<CheckItem>
+    {
+        new CheckItem { Criterion = "Protocol",
+            Finding = uri.Scheme == "https" ? "HTTPS (encrypted)" : "HTTP (not encrypted)",
+            Level = uri.Scheme == "https" ? "Safe" : "Warning" },
+        new CheckItem { Criterion = "Domain",
+            Finding = uri.Host, Level = domainLevel },
+    };
+
+            foreach (CheckFinding f in homograph)
+            {
+                items.Add(new CheckItem
+                {
+                    Criterion = f.Criterion,
+                    Finding = f.Finding,
+                    Level = f.Level
+                });
+            }
+
+            // OnlineCheck
+            CheckItem redirects = null, reputation = null, ssl = null, blacklist = null;
+            if (OnlineMode)
+            {
+                redirects = new CheckItem { Criterion = "Redirects", Finding = "Scanning...", Level = "Warning" };
+                reputation = new CheckItem { Criterion = "Reputation", Finding = "Scanning...", Level = "Warning" };
+                ssl = new CheckItem { Criterion = "SSL", Finding = "Not checked yet", Level = "Warning" };
+                blacklist = new CheckItem { Criterion = "Blacklist", Finding = "Scanning...", Level = "Warning" };
+                items.Add(redirects);
+                items.Add(reputation);
+                items.Add(ssl);
+                items.Add(blacklist);
+            }
+
+            // 3) Hiển thị ngay kết quả offline
+            _lastUrl = input;
+            _lastItems = items;
+            ShowResult(items, input);
+            StatusText.Text = "Checked: " + uri.Host + (OnlineMode ? " - scanning online..." : " (offline)");
+
+            if (!OnlineMode) return;
+
+            if (!OnlineMode) return;
+
+            // Hủy lần quét trước nếu vẫn đang chạy
+            _scanCts?.Cancel();
+
+            // Tạo token riêng cho lần quét hiện tại
+            var scanCts = new CancellationTokenSource();
+            _scanCts = scanCts;
+
+            // 4) Gọi VirusTotal rồi điền vào các mục
+            var button = sender as Button;
+
+            try
+            {
+                ScanResult r = await GetApi().ScanUrlAsync(input);
+                HttpProbeResult r_2 = await ClientMng.RunAsync(input, _scanCts.Token);
+
+                if (myId != _checkId) return;   // người dùng đã Clear hoặc kiểm tra link khác
+
+                int total = r.Malicious + r.Suspicious + r.Harmless + r.Undetected;
+
+                blacklist.Finding = r.Malicious + " malicious, " + r.Suspicious + " suspicious (of " + total + " engines)";
+                blacklist.Level = r.Malicious > 0 ? "Danger" : r.Suspicious > 0 ? "Warning" : "Safe";
+
+                reputation.Finding = r.Harmless + " harmless, " + r.Undetected + " undetected";
+                reputation.Level = (r.Malicious + r.Suspicious) > 0 ? "Warning" : "Safe";
+
+                redirects.Finding = Convert.ToString(r_2.StatusCode);
+                redirects.Level = (300 < r_2.StatusCode || r_2.StatusCode < 400) ? "Warning" : "Safe";
+
+                StatusText.Text = "Checked: " + uri.Host;
+            }
+            catch (Exception ex)
+            {
+                if (myId != _checkId) return;
+
+                blacklist.Finding = "Unavailable: " + ex.Message;
+                reputation.Finding = "Unavailable";
+                StatusText.Text = "Online scan failed";
+            }
+            finally
+            {
+                if (button != null)
+                    button.IsEnabled = true;
+
+                if (ReferenceEquals(_scanCts, scanCts))
+                    _scanCts = null;
+
+                scanCts.Dispose();
+            }
+
+            if (myId == _checkId)
+                UpdateVerdict(items);   
+        }
+
+        // Gom phần hiển thị + verdict để gọi lại sau khi có kết quả online
+        private void ShowResult(List<CheckItem> items, string input)
+        {
+            ResultGrid.ItemsSource = items;
+            CheckedUrlText.Text = input;
+            UpdateVerdict(items);
+
+            EmptyHint.Visibility = Visibility.Collapsed;
+            PipelineOverview.Visibility = Visibility.Collapsed;
+            ResultPanel.Visibility = Visibility.Visible;
+        }
+        private void UpdateVerdict(List<CheckItem> items)
+        {
+            if (items.Any(i => i.Level == "Danger"))
+            {
+                VerdictText.Text = "DANGEROUS";
+                VerdictText.Foreground = Brushes.Red;
+            }
+            else
+            {
+                VerdictText.Text = "SAMPLE RESULT";
+                VerdictText.Foreground = Brushes.DarkOrange;
+            }
+            ScoreText.Text = "--";
+        }
+        private void ClearButton_Click(object sender, RoutedEventArgs e)
+        {
+            LinkTextBox.Clear();
+            ResultGrid.ItemsSource = null;
+            ResultPanel.Visibility = Visibility.Collapsed;
+            PipelineOverview.Visibility = Visibility.Visible;
+            EmptyHint.Visibility = Visibility.Visible;
+            StatusText.Text = "Ready";
+            _checkId++;
+            _lastItems = null;
+            _lastUrl = null;
+            _scanCts?.Cancel();
+            _scanCts = null;
+        }
+        private void Show_result(object sender, RoutedEventArgs e)
+        {
+
+            if (_lastItems == null) return;
+
+            DetailRequested?.Invoke(this, new DetailRequestedEventArgs
+            {
+                Url = _lastUrl,
+                Items = _lastItems
+            });
+
+        }
+        private void Show_information(object sender, RoutedEventArgs e)
+        {
+            MessageBox.Show("Hello");
+        }
+        private void Tool_Enter(object sender, MouseEventArgs e)
+        {
+            var item = sender as FrameworkElement;
+            StatusText.Text = item.Tag.ToString();
+        }
+        private void Leave(object sender, MouseEventArgs e)
+        {
+            StatusText.Text = "ready";
+        }
+    }
+}

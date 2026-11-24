@@ -58,6 +58,7 @@
       <SubType>Designer</SubType>
     </ApplicationDefinition>
     <Compile Include="Manager\API_request.cs" />
+    <Compile Include="Manager\VT_response.cs" />
     <Compile Include="Manager\VT_ScanStore.cs" />
     <Compile Include="Manager\HttpClient.cs" />
     <Compile Include="Manager\Network.cs" />

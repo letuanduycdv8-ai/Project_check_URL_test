@@ -401,6 +401,13 @@ namespace Project_check_URL.View
             PageScroll.ScrollToVerticalOffset(PageScroll.VerticalOffset - e.Delta * 0.8);
             e.Handled = true;
         }
+
+        // DataGrid nuốt sự kiện lăn chuột; chuyển nó cho ScrollViewer của cả trang
+        private void ResultGrid_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            PageScroll.ScrollToVerticalOffset(PageScroll.VerticalOffset - e.Delta * 0.8);
+            e.Handled = true;
+        }
         private void UpdateVerdict(List<CheckItem> items)
         {
             if (items.Any(i => i.Level == "Danger"))

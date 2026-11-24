@@ -18,9 +18,25 @@ namespace Project_check_URL.View
         public string Url { get; set; }
         public List<CheckItem> Items { get; set; }
     }
+    // Một dòng "nhãn: giá trị" trong phần chi tiết của một mục kiểm tra.
+    // Value == null thì dòng này là tiêu đề nhóm (vd "Flagged as malicious (3)").
+    public class DetailLine
+    {
+        public DetailLine(string label, string value)
+        {
+            Label = label;
+            Value = value;
+        }
+
+        public string Label { get; }
+        public string Value { get; }
+        public bool IsHeading { get { return Value == null; } }
+    }
+
     public class CheckItem : INotifyPropertyChanged
     {
         private string _finding, _level;
+        private List<DetailLine> _details = new List<DetailLine>();
 
         public string Criterion { get; set; }
 
@@ -34,6 +50,14 @@ namespace Project_check_URL.View
         {
             get { return _level; }
             set { _level = value; OnPropertyChanged(); }
+        }
+
+        // Nội dung chi tiết (những gì đã tải và kiểm tra được) cho màn hình Detail.
+        // Gán lại cả danh sách khi có kết quả mới để DetailView tự cập nhật.
+        public List<DetailLine> Details
+        {
+            get { return _details; }
+            set { _details = value ?? new List<DetailLine>(); OnPropertyChanged(); }
         }
 
         public event PropertyChangedEventHandler PropertyChanged;
@@ -90,7 +114,7 @@ namespace Project_check_URL.View
                 _netCts?.Cancel();
             };
 
-            _ = RefreshNetworkAsync();  
+            _ = RefreshNetworkAsync();
         }
 
         private void SetChecking(bool busy)
@@ -126,11 +150,11 @@ namespace Project_check_URL.View
             }
 
             OnlineToggle.IsChecked = online;
-            ApplyNetworkState();            
+            ApplyNetworkState();
             StatusText.Text = "Ready";
         }
 
-        
+
         private void OnNetworkChanged(object sender, NetworkAvailabilityEventArgs e)
             => _ = DebouncedRefreshAsync();
 
@@ -196,9 +220,11 @@ namespace Project_check_URL.View
     {
         new CheckItem { Criterion = "Protocol",
             Finding = uri.Scheme == "https" ? "HTTPS (encrypted)" : "HTTP (not encrypted)",
-            Level = uri.Scheme == "https" ? "Safe" : "Warning" },
+            Level = uri.Scheme == "https" ? "Safe" : "Warning",
+            Details = CheckDetails.ForProtocol(uri) },
         new CheckItem { Criterion = "Domain",
-            Finding = uri.Host, Level = domainLevel },
+            Finding = uri.Host, Level = domainLevel,
+            Details = CheckDetails.ForDomain(uri) },
     };
 
             foreach (CheckFinding f in homograph)
@@ -207,21 +233,26 @@ namespace Project_check_URL.View
                 {
                     Criterion = f.Criterion,
                     Finding = f.Finding,
-                    Level = f.Level
+                    Level = f.Level,
+                    Details = CheckDetails.ForHomograph(uri, f)
                 });
             }
 
             // OnlineCheck
-            CheckItem redirects = null, reputation = null, ssl = null, blacklist = null;
+            CheckItem redirects = null, reputation = null, contentType = null, blacklist = null;
             if (OnlineMode)
             {
-                redirects = new CheckItem { Criterion = "Redirects", Finding = "Scanning...", Level = "Warning" };
-                reputation = new CheckItem { Criterion = "Reputation", Finding = "Scanning...", Level = "Warning" };
-                ssl = new CheckItem { Criterion = "SSL", Finding = "Not checked yet", Level = "Warning" };
-                blacklist = new CheckItem { Criterion = "Blacklist", Finding = "Scanning...", Level = "Warning" };
+                redirects = new CheckItem { Criterion = "Redirects", Finding = "Scanning...", Level = "Warning",
+                    Details = CheckDetails.Pending("Waiting for the server to answer...") };
+                reputation = new CheckItem { Criterion = "Reputation", Finding = "Scanning...", Level = "Warning",
+                    Details = CheckDetails.Pending("Waiting for VirusTotal to finish the scan...") };
+                contentType = new CheckItem { Criterion = "Content-Type", Finding = "Scanning...", Level = "Warning",
+                    Details = CheckDetails.Pending("Waiting for the server to answer...") };
+                blacklist = new CheckItem { Criterion = "Blacklist", Finding = "Scanning...", Level = "Warning",
+                    Details = CheckDetails.Pending("Waiting for VirusTotal to finish the scan...") };
                 items.Add(redirects);
                 items.Add(reputation);
-                items.Add(ssl);
+                items.Add(contentType);
                 items.Add(blacklist);
             }
 
@@ -233,8 +264,6 @@ namespace Project_check_URL.View
 
             if (!OnlineMode) return;
 
-            if (!OnlineMode) return;
-
             // Hủy lần quét trước nếu vẫn đang chạy
             _scanCts?.Cancel();
 
@@ -242,50 +271,112 @@ namespace Project_check_URL.View
             var scanCts = new CancellationTokenSource();
             _scanCts = scanCts;
 
-            // 4) Gọi VirusTotal rồi điền vào các mục
-            var button = sender as Button;
-
+            bool[] ok;
             try
             {
-                ScanResult r = await GetApi().ScanUrlAsync(input);
-                HttpProbeResult r_2 = await ClientMng.RunAsync(input, _scanCts.Token);
-
-                if (myId != _checkId) return;   // người dùng đã Clear hoặc kiểm tra link khác
-
-                int total = r.Malicious + r.Suspicious + r.Harmless + r.Undetected;
-
-                blacklist.Finding = r.Malicious + " malicious, " + r.Suspicious + " suspicious (of " + total + " engines)";
-                blacklist.Level = r.Malicious > 0 ? "Danger" : r.Suspicious > 0 ? "Warning" : "Safe";
-
-                reputation.Finding = r.Harmless + " harmless, " + r.Undetected + " undetected";
-                reputation.Level = (r.Malicious + r.Suspicious) > 0 ? "Warning" : "Safe";
-
-                redirects.Finding = Convert.ToString(r_2.StatusCode);
-                redirects.Level = (300 < r_2.StatusCode || r_2.StatusCode < 400) ? "Warning" : "Safe";
-
-                StatusText.Text = "Checked: " + uri.Host;
-            }
-            catch (Exception ex)
-            {
-                if (myId != _checkId) return;
-
-                blacklist.Finding = "Unavailable: " + ex.Message;
-                reputation.Finding = "Unavailable";
-                StatusText.Text = "Online scan failed";
+                // VirusTotal (chậm, có thể hơn 1 phút) và thăm dò HTTP chạy song song:
+                // cái nào xong trước thì điền trước, cái này lỗi không làm mất kết quả cái kia
+                ok = await Task.WhenAll(
+                    FillVirusTotalAsync(input, myId, reputation, blacklist),
+                    FillHttpAsync(input, myId, scanCts.Token, redirects, contentType));
             }
             finally
             {
-                if (button != null)
-                    button.IsEnabled = true;
-
                 if (ReferenceEquals(_scanCts, scanCts))
                     _scanCts = null;
 
                 scanCts.Dispose();
             }
 
-            if (myId == _checkId)
-                UpdateVerdict(items);   
+            if (myId != _checkId) return;   // người dùng đã Clear hoặc kiểm tra link khác
+
+            StatusText.Text = ok.All(x => x)
+                ? "Checked: " + uri.Host
+                : "Checked: " + uri.Host + " (some online checks failed)";
+            UpdateVerdict(items);
+        }
+
+        // Quét VirusTotal rồi điền vào hàng Reputation và Blacklist. Trả về false nếu lỗi.
+        private async Task<bool> FillVirusTotalAsync(string url, int myId, CheckItem reputation, CheckItem blacklist)
+        {
+            try
+            {
+                ScanResult r = await GetApi().ScanUrlAsync(url);
+
+                if (myId != _checkId) return true;   // kết quả cũ, bỏ
+
+                int total = r.Malicious + r.Suspicious + r.Harmless + r.Undetected;
+
+                blacklist.Finding = r.Malicious + " malicious, " + r.Suspicious + " suspicious (of " + total + " engines)";
+                blacklist.Level = r.Malicious > 0 ? "Danger" : r.Suspicious > 0 ? "Warning" : "Safe";
+                blacklist.Details = CheckDetails.ForBlacklist(r);
+
+                reputation.Finding = r.Harmless + " harmless, " + r.Undetected + " undetected";
+                reputation.Level = (r.Malicious + r.Suspicious) > 0 ? "Warning" : "Safe";
+                reputation.Details = CheckDetails.ForReputation(r);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                if (myId != _checkId) return false;
+
+                blacklist.Finding = "Unavailable: " + ex.Message;
+                blacklist.Details = CheckDetails.ForError("VirusTotal", ex);
+                reputation.Finding = "Unavailable";
+                reputation.Details = CheckDetails.ForError("VirusTotal", ex);
+                return false;
+            }
+        }
+
+        // Thăm dò HTTP (không tải body) rồi điền vào hàng Redirects và Content-Type. Trả về false nếu lỗi.
+        private async Task<bool> FillHttpAsync(string url, int myId, CancellationToken token,
+                                               CheckItem redirects, CheckItem contentType)
+        {
+            try
+            {
+                HttpProbeResult p = await ClientMng.RunAsync(url, token);
+
+                if (myId != _checkId) return true;   // kết quả cũ, bỏ
+
+                // Redirects: giữ cách hiển thị cũ (mã trạng thái). Nếu không nhận được phản hồi
+                // hợp lệ thì báo lỗi thay vì hiện "0 / Safe".
+                if (p.Error != null)
+                {
+                    redirects.Finding = p.Error;
+                    redirects.Level = "Warning";
+                }
+                else
+                {
+                    redirects.Finding = p.StatusCode.ToString();
+                    redirects.Level = (300 < p.StatusCode && p.StatusCode < 400) ? "Warning" : "Safe";
+                }
+                redirects.Details = CheckDetails.ForRedirects(p);
+
+                // Content-Type (thay cho hàng SSL cũ)
+                if (p.ContentType == null)
+                {
+                    contentType.Finding = p.Error != null ? "Unavailable: " + p.Error : "Not provided";
+                    contentType.Level = "Warning";
+                }
+                else
+                {
+                    contentType.Finding = p.ContentType;
+                    contentType.Level = CheckDetails.ContentTypeLevel(p);
+                }
+                contentType.Details = CheckDetails.ForContentType(p);
+
+                return p.Error == null;
+            }
+            catch (Exception ex)
+            {
+                if (myId != _checkId) return false;
+
+                redirects.Finding = "Unavailable: " + ex.Message;
+                redirects.Details = CheckDetails.ForError("HTTP check", ex);
+                contentType.Finding = "Unavailable";
+                contentType.Details = CheckDetails.ForError("HTTP check", ex);
+                return false;
+            }
         }
 
         // Gom phần hiển thị + verdict để gọi lại sau khi có kết quả online
@@ -295,9 +386,20 @@ namespace Project_check_URL.View
             CheckedUrlText.Text = input;
             UpdateVerdict(items);
 
+            // Có kết quả: ẩn phần tiêu đề để bảng kết quả chiếm gần hết màn hình,
+            // ô nhập URL nằm gọn phía trên và sẽ cuộn lên cùng trang khi lăn chuột.
+            HeroText.Visibility = Visibility.Collapsed;
             EmptyHint.Visibility = Visibility.Collapsed;
             PipelineOverview.Visibility = Visibility.Collapsed;
             ResultPanel.Visibility = Visibility.Visible;
+            PageScroll.ScrollToTop();
+        }
+
+        // DataGrid nuốt sự kiện lăn chuột; chuyển nó cho ScrollViewer của cả trang
+        private void ResultGrid_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            PageScroll.ScrollToVerticalOffset(PageScroll.VerticalOffset - e.Delta * 0.8);
+            e.Handled = true;
         }
         private void UpdateVerdict(List<CheckItem> items)
         {
@@ -319,7 +421,9 @@ namespace Project_check_URL.View
             ResultGrid.ItemsSource = null;
             ResultPanel.Visibility = Visibility.Collapsed;
             PipelineOverview.Visibility = Visibility.Visible;
+            HeroText.Visibility = Visibility.Visible;
             EmptyHint.Visibility = Visibility.Visible;
+            PageScroll.ScrollToTop();
             StatusText.Text = "Ready";
             _checkId++;
             _lastItems = null;

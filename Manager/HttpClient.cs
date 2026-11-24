@@ -1,11 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,16 +20,37 @@ namespace Project_check_URL
         public string FinalUrl { get; set; }
         public int StatusCode { get; set; }
         public string ReasonPhrase { get; set; }
-        public string ContentType { get; set; }
+        public string ContentType { get; set; }        // chỉ phần media type, vd "text/html"
+        public string RawContentType { get; set; }     // nguyên giá trị header, vd "text/html; charset=utf-8"
         public Dictionary<string, string> Headers { get; set; }
         public List<string> RedirectChain { get; set; }
+        public List<HttpHop> Hops { get; set; }        // chi tiết từng bước đã nhận được phản hồi
         public string Error { get; set; }
+        public DateTime ProbedAt { get; set; }         // giờ UTC bắt đầu thăm dò
 
         public HttpProbeResult()
         {
             Headers = new Dictionary<string, string>();
             RedirectChain = new List<string>();
+            Hops = new List<HttpHop>();
         }
+    }
+
+    // Một bước trong chuỗi chuyển hướng (một lần gửi GET và nhận header)
+    internal class HttpHop
+    {
+        public string Url { get; set; }
+        public string Ips { get; set; }                // các IP đã phân giải và kiểm tra, cách nhau bởi ", "
+        public int StatusCode { get; set; }
+        public string ReasonPhrase { get; set; }
+        public string Location { get; set; }           // header Location nếu có
+
+        // chỉ có khi https
+        public string TlsProtocol { get; set; }
+        public string CertSubject { get; set; }
+        public string CertIssuer { get; set; }
+        public DateTime? CertNotBefore { get; set; }
+        public DateTime? CertNotAfter { get; set; }
     }
 
     // Bản dành cho .NET Framework 4.7.2 / 4.8 (C# 7.3).
@@ -68,6 +91,12 @@ namespace Project_check_URL
             public string ReasonPhrase;
             public Dictionary<string, string> Headers =
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            public string TlsProtocol;
+            public string CertSubject;
+            public string CertIssuer;
+            public DateTime? CertNotBefore;
+            public DateTime? CertNotAfter;
         }
 
         // ===== Main =====
@@ -78,7 +107,8 @@ namespace Project_check_URL
                 Url = url,
                 FinalUrl = url,
                 Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
-                RedirectChain = new List<string>()
+                RedirectChain = new List<string>(),
+                ProbedAt = DateTime.UtcNow
             };
 
             Uri current;
@@ -139,11 +169,30 @@ namespace Project_check_URL
 
                         string ctype;
                         result.ContentType = null;
+                        result.RawContentType = null;
                         if (resp.Headers.TryGetValue("Content-Type", out ctype))
                         {
+                            result.RawContentType = ctype;
                             int semi = ctype.IndexOf(';');
                             result.ContentType = (semi >= 0 ? ctype.Substring(0, semi) : ctype).Trim();
                         }
+
+                        // Lưu lại bước này để màn hình Detail hiển thị
+                        string location;
+                        resp.Headers.TryGetValue("Location", out location);
+                        result.Hops.Add(new HttpHop
+                        {
+                            Url = current.AbsoluteUri,
+                            Ips = string.Join(", ", ips.Select(x => x.ToString())),
+                            StatusCode = resp.StatusCode,
+                            ReasonPhrase = resp.ReasonPhrase,
+                            Location = location,
+                            TlsProtocol = resp.TlsProtocol,
+                            CertSubject = resp.CertSubject,
+                            CertIssuer = resp.CertIssuer,
+                            CertNotBefore = resp.CertNotBefore,
+                            CertNotAfter = resp.CertNotAfter
+                        });
 
                         result.Headers.Clear();                       // chỉ giữ header của bước cuối
                         foreach (var kv in resp.Headers)
@@ -271,6 +320,7 @@ namespace Project_check_URL
             using (token.Register(() => tcp.Close()))             // hủy giữa chừng thì đóng socket
             {
                 Stream stream = tcp.GetStream();
+                SslStream tlsInfo = null;
                 try
                 {
                     if (uri.Scheme == Uri.UriSchemeHttps)
@@ -280,6 +330,7 @@ namespace Project_check_URL
                         stream = ssl;
                         await ssl.AuthenticateAsClientAsync(
                             GetNetworkHost(uri), null, SslProtocols.Tls12, false).ConfigureAwait(false);
+                        tlsInfo = ssl;
                     }
 
                     byte[] request = BuildRequestBytes(uri);
@@ -287,12 +338,37 @@ namespace Project_check_URL
                     await stream.FlushAsync(token).ConfigureAwait(false);
 
                     string headerBlock = await ReadHeaderBlockAsync(stream, token).ConfigureAwait(false);
-                    return ParseResponse(headerBlock);
+                    RawResponse parsed = ParseResponse(headerBlock);
+                    FillTlsInfo(parsed, tlsInfo);
+                    return parsed;
                 }
                 finally
                 {
                     stream.Dispose();
                 }
+            }
+        }
+
+        // Ghi lại giao thức TLS và chứng chỉ của máy chủ (nếu là https)
+        private static void FillTlsInfo(RawResponse resp, SslStream ssl)
+        {
+            if (ssl == null) return;
+
+            resp.TlsProtocol = ssl.SslProtocol.ToString();
+            try
+            {
+                if (ssl.RemoteCertificate != null)
+                {
+                    var cert = new X509Certificate2(ssl.RemoteCertificate);
+                    resp.CertSubject = cert.Subject;
+                    resp.CertIssuer = cert.Issuer;
+                    resp.CertNotBefore = cert.NotBefore.ToUniversalTime();
+                    resp.CertNotAfter = cert.NotAfter.ToUniversalTime();
+                }
+            }
+            catch (Exception)
+            {
+                // không đọc được chứng chỉ thì bỏ qua, các thông tin khác vẫn dùng được
             }
         }
 

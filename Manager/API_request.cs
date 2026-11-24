@@ -15,11 +15,42 @@ namespace Project_check_URL
         public int Suspicious { get; set; }
         public int Harmless { get; set; }
         public int Undetected { get; set; }
+        public int Timeout { get; set; }
+
+        public DateTime? ScanDate { get; set; }          // giờ UTC VirusTotal hoàn tất phân tích
+        public string ScannedUrl { get; set; }           // URL mà VirusTotal ghi nhận
+        public string UrlId { get; set; }                // dùng để mở trang kết quả trên VirusTotal
+        public List<EngineResult> Engines { get; private set; }
+
+        public ScanResult()
+        {
+            Engines = new List<EngineResult>();
+        }
+
+        // Trang kết quả đầy đủ trên VirusTotal (null nếu response không có url id)
+        public string ReportLink
+        {
+            get
+            {
+                return string.IsNullOrEmpty(UrlId)
+                    ? null
+                    : "https://www.virustotal.com/gui/url/" + UrlId;
+            }
+        }
 
         public bool IsCompleted
         {
             get { return Status == "completed"; }
         }
+    }
+
+    // Kết quả của một engine bảo mật trong VirusTotal
+    internal class EngineResult
+    {
+        public string Engine { get; set; }
+        public string Category { get; set; }   // malicious / suspicious / harmless / undetected / timeout ...
+        public string Result { get; set; }     // vd "phishing", "clean", "unrated"
+        public string Method { get; set; }     // vd "blacklist"
     }
 
     // Vượt quota (HTTP 429)
@@ -144,6 +175,47 @@ namespace Project_check_URL
                 result.Suspicious = GetInt(stats, "suspicious");
                 result.Harmless = GetInt(stats, "harmless");
                 result.Undetected = GetInt(stats, "undetected");
+                result.Timeout = GetInt(stats, "timeout");
+
+                // Ngày phân tích (unix giây, UTC)
+                object date;
+                if (attrs.TryGetValue("date", out date) && date != null)
+                {
+                    try
+                    {
+                        result.ScanDate = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+                            .AddSeconds(Convert.ToInt64(date));
+                    }
+                    catch (Exception) { }
+                }
+
+                // Kết quả từng engine
+                Dictionary<string, object> engines = GetObject(attrs, "results");
+                if (engines != null)
+                {
+                    foreach (KeyValuePair<string, object> kv in engines)
+                    {
+                        var e = kv.Value as Dictionary<string, object>;
+                        if (e == null) continue;
+
+                        result.Engines.Add(new EngineResult
+                        {
+                            Engine = GetString(e, "engine_name") ?? kv.Key,
+                            Category = GetString(e, "category") ?? "unknown",
+                            Result = GetString(e, "result"),
+                            Method = GetString(e, "method")
+                        });
+                    }
+                    result.Engines.Sort((a, b) => string.Compare(a.Engine, b.Engine, StringComparison.OrdinalIgnoreCase));
+                }
+            }
+
+            // URL mà VirusTotal đã phân tích (meta.url_info)
+            Dictionary<string, object> urlInfo = GetObject(GetObject(root, "meta"), "url_info");
+            if (urlInfo != null)
+            {
+                result.UrlId = GetString(urlInfo, "id");
+                result.ScannedUrl = GetString(urlInfo, "url");
             }
 
             return result;
@@ -163,6 +235,14 @@ namespace Project_check_URL
             if (parent != null && parent.TryGetValue(key, out value))
                 return value as Dictionary<string, object>;
             return null;
+        }
+
+        private static string GetString(Dictionary<string, object> obj, string key)
+        {
+            object value;
+            if (obj == null || !obj.TryGetValue(key, out value) || value == null)
+                return null;
+            return value.ToString();
         }
 
         private static int GetInt(Dictionary<string, object> obj, string key)

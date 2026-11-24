@@ -28,6 +28,110 @@
             <GradientStop Color="#122D45" Offset="1"/>
         </LinearGradientBrush>
 
+        <!-- ================= SCROLLBAR (dark / slim) ================= -->
+
+        <Style x:Key="ScrollThumbStyle" TargetType="{x:Type Thumb}">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="IsTabStop" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type Thumb}">
+                        <Border x:Name="thumb"
+                                Background="#2F6D93"
+                                CornerRadius="4"
+                                Margin="2"/>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="thumb" Property="Background" Value="#4FA3D1"/>
+                            </Trigger>
+                            <Trigger Property="IsDragging" Value="True">
+                                <Setter TargetName="thumb" Property="Background" Value="#72D7F5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ScrollTrackButtonStyle" TargetType="{x:Type RepeatButton}">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="IsTabStop" Value="False"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type RepeatButton}">
+                        <Border Background="Transparent"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="{x:Type ScrollBar}">
+            <Setter Property="OverridesDefaultStyle" Value="True"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Width" Value="12"/>
+            <Setter Property="MinWidth" Value="12"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ScrollBar}">
+                        <Grid Background="Transparent">
+                            <Border Background="#0A1D31"
+                                    Opacity="0.55"
+                                    CornerRadius="6"
+                                    Margin="2"/>
+                            <Track x:Name="PART_Track"
+                                   IsDirectionReversed="True">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageUpCommand"
+                                                  Style="{StaticResource ScrollTrackButtonStyle}"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource ScrollThumbStyle}"/>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageDownCommand"
+                                                  Style="{StaticResource ScrollTrackButtonStyle}"/>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="Orientation" Value="Horizontal">
+                    <Setter Property="Width" Value="Auto"/>
+                    <Setter Property="MinWidth" Value="0"/>
+                    <Setter Property="Height" Value="12"/>
+                    <Setter Property="MinHeight" Value="12"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="{x:Type ScrollBar}">
+                                <Grid Background="Transparent">
+                                    <Border Background="#0A1D31"
+                                            Opacity="0.55"
+                                            CornerRadius="6"
+                                            Margin="2"/>
+                                    <Track x:Name="PART_Track">
+                                        <Track.DecreaseRepeatButton>
+                                            <RepeatButton Command="ScrollBar.PageLeftCommand"
+                                                          Style="{StaticResource ScrollTrackButtonStyle}"/>
+                                        </Track.DecreaseRepeatButton>
+                                        <Track.Thumb>
+                                            <Thumb Style="{StaticResource ScrollThumbStyle}"/>
+                                        </Track.Thumb>
+                                        <Track.IncreaseRepeatButton>
+                                            <RepeatButton Command="ScrollBar.PageRightCommand"
+                                                          Style="{StaticResource ScrollTrackButtonStyle}"/>
+                                        </Track.IncreaseRepeatButton>
+                                    </Track>
+                                </Grid>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
         <!-- ================= PRIMARY BUTTON ================= -->
 
         <Style x:Key="PrimaryButton" TargetType="Button">
@@ -468,13 +572,12 @@
         <Grid Grid.Row="1" ClipToBounds="True">
 
             <Grid.RowDefinitions>
-                <RowDefinition Height="45*" MinHeight="250"/>
-                <RowDefinition Height="55*"/>
+                <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
 
 
-            <Border Grid.RowSpan="2"
+            <Border 
                     IsHitTestVisible="False">
 
                 <Border.Background>
@@ -487,7 +590,7 @@
 
             <!-- DARK GRADIENT OVERLAY -->
 
-            <Border Grid.RowSpan="2"
+            <Border 
                     IsHitTestVisible="False">
 
                 <Border.Background>
@@ -510,7 +613,7 @@
 
             <!-- DECORATIVE LIGHT EFFECTS -->
 
-            <Border Grid.RowSpan="2"
+            <Border 
                     HorizontalAlignment="Left"
                     VerticalAlignment="Top"
                     Width="420"
@@ -528,7 +631,7 @@
 
             </Border>
 
-            <Border Grid.RowSpan="2"
+            <Border 
                     HorizontalAlignment="Right"
                     VerticalAlignment="Top"
                     Width="500"
@@ -546,195 +649,196 @@
 
             </Border>
 
-            <!-- ============================================== -->
-            <!-- HERO + URL SEARCH                              -->
-            <!-- ============================================== -->
-
-            <StackPanel Grid.Row="0"
-                        VerticalAlignment="Center"
-                        Margin="30,8"
-                        MaxWidth="1200"
-                        HorizontalAlignment="Stretch">
-
-                <!-- HERO TEXT -->
-
-                <StackPanel HorizontalAlignment="Center"
-                            Margin="0,0,0,12">
-
-                    <TextBlock Text="CHECK BEFORE YOU CLICK"
-                               Foreground="#50D5F5"
-                               FontSize="10"
-                               FontWeight="Bold"
-                               HorizontalAlignment="Center"/>
-
-                    <TextBlock Text="Know what's behind every link."
-                               Foreground="White"
-                               FontSize="28"
-                               FontWeight="Bold"
-                               TextAlignment="Center"
-                               Margin="0,4,0,0"/>
-
-                    <TextBlock Text="Analyze suspicious URLs with offline intelligence and online security checks."
-                               Foreground="#A9C2D5"
-                               FontSize="13"
-                               TextAlignment="Center"
-                               TextWrapping="Wrap"
-                               Margin="0,4,0,0"/>
-
-                </StackPanel>
-
-                <!-- URL SEARCH CARD -->
-
-                <Border Background="{StaticResource GlassCardBrush}"
-                        CornerRadius="16"
-                        Padding="22,14"
-                        HorizontalAlignment="Stretch"
-                        BorderBrush="#2C5C7E"
-                        BorderThickness="1">
-
-                    <Border.Effect>
-                        <DropShadowEffect BlurRadius="24"
-                                          ShadowDepth="6"
-                                          Opacity="0.3"
-                                          Color="#000000"/>
-                    </Border.Effect>
-
-                    <StackPanel>
-
-                        <TextBlock Text="Enter a URL to inspect"
-                                   FontSize="13"
-                                   FontWeight="SemiBold"
-                                   Foreground="#D9EAF7"
-                                   Margin="2,0,0,8"/>
-
-                        <Grid>
-
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-
-                            <Border Grid.Column="0"
-                                    Background="#0B1E31"
-                                    BorderBrush="#2A5272"
-                                    BorderThickness="1"
-                                    CornerRadius="10"
-                                    Padding="13,0"
-                                    Height="42">
-
-                                <DockPanel>
-
-                                    <TextBlock Text="⌕"
-                                               FontSize="20"
-                                               Foreground="#6FA5C2"
-                                               VerticalAlignment="Center"
-                                               Margin="0,0,9,0"/>
-
-                                    <TextBox x:Name="LinkTextBox"
-                                             BorderThickness="0"
-                                             Background="Transparent"
-                                             FontSize="14"
-                                             Foreground="#EAF5FF"
-                                             CaretBrush="#EAF5FF"
-                                             SelectionBrush="#08A9D6"
-                                             VerticalContentAlignment="Center"
-                                             Padding="0"
-                                             ToolTip="Paste the URL here"/>
-
-                                </DockPanel>
-                            </Border>
-
-                            <Button x:Name="CheckButton"
-                                    Grid.Column="1"
-                                    Content="Scan URL  →"
-                                    Height="42"
-                                    Margin="12,0,0,0"
-                                    IsDefault="True"
-                                    Style="{StaticResource PrimaryButton}"
-                                    Click="CheckButton_Click"/>
-
-                        </Grid>
-
-                        <!-- ONLINE STATUS -->
-
-                        <StackPanel Orientation="Horizontal"
-                                    VerticalAlignment="Center"
-                                    Margin="2,10,0,0">
-
-                            <ToggleButton x:Name="OnlineToggle"
-                                          Style="{StaticResource OnlineToggleStyle}"
-                                          Content="Checking..."
-                                          IsChecked="False"
-                                          IsHitTestVisible="False"
-                                          Checked="OnlineToggle_Changed"
-                                          Unchecked="OnlineToggle_Changed"/>
-
-                            <Ellipse x:Name="CheckingSpinner"
-                                     Width="14"
-                                     Height="14"
-                                     Margin="10,0,0,0"
-                                     Stroke="#08A9D6"
-                                     StrokeThickness="2"
-                                     StrokeDashArray="3 2"
-                                     RenderTransformOrigin="0.5,0.5"
-                                     VerticalAlignment="Center">
-
-                                <Ellipse.RenderTransform>
-                                    <RotateTransform x:Name="SpinnerRotate"/>
-                                </Ellipse.RenderTransform>
-
-                                <Ellipse.Triggers>
-                                    <EventTrigger RoutedEvent="FrameworkElement.Loaded">
-                                        <BeginStoryboard>
-                                            <Storyboard RepeatBehavior="Forever">
-                                                <DoubleAnimation
-                                                    Storyboard.TargetName="SpinnerRotate"
-                                                    Storyboard.TargetProperty="Angle"
-                                                    From="0"
-                                                    To="360"
-                                                    Duration="0:0:1"/>
-                                            </Storyboard>
-                                        </BeginStoryboard>
-                                    </EventTrigger>
-                                </Ellipse.Triggers>
-
-                            </Ellipse>
-
-                            <TextBlock Text="Offline checks are always available"
-                                       Foreground="#8FB0C6"
-                                       FontSize="11"
-                                       VerticalAlignment="Center"
-                                       Margin="10,0,0,0"/>
-
-                        </StackPanel>
-
-                    </StackPanel>
-                </Border>
-
-                <!-- EMPTY HINT -->
-
-                <TextBlock x:Name="EmptyHint"
-                           Margin="0,10,0,0"
-                           Text="Paste a link above and select Scan URL to view its security assessment."
-                           Foreground="#B5C9D8"
-                           FontSize="12"
-                           HorizontalAlignment="Center"
-                           TextWrapping="Wrap"
-                           TextAlignment="Center"/>
-
-            </StackPanel>
-
             <!-- ================================================== -->
             <!-- RESULT + OVERVIEW SCROLL AREA                      -->
             <!-- ================================================== -->
 
-            <ScrollViewer Grid.Row="1"
+            <ScrollViewer x:Name="PageScroll"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled">
 
                 <StackPanel Margin="30,4,30,14"
                             MaxWidth="1200"
                             HorizontalAlignment="Stretch">
+
+                    <!-- ============================================== -->
+                    <!-- HERO + URL SEARCH                              -->
+                    <!-- ============================================== -->
+
+                    <StackPanel x:Name="SearchSection"
+                            Margin="0,14,0,18"
+                            HorizontalAlignment="Stretch">
+
+                        <!-- HERO TEXT -->
+
+                        <StackPanel x:Name="HeroText"
+                                HorizontalAlignment="Center"
+                                Margin="0,0,0,12">
+
+                            <TextBlock Text="CHECK BEFORE YOU CLICK"
+                                   Foreground="#50D5F5"
+                                   FontSize="10"
+                                   FontWeight="Bold"
+                                   HorizontalAlignment="Center"/>
+
+                            <TextBlock Text="Know what's behind every link."
+                                   Foreground="White"
+                                   FontSize="28"
+                                   FontWeight="Bold"
+                                   TextAlignment="Center"
+                                   Margin="0,4,0,0"/>
+
+                            <TextBlock Text="Analyze suspicious URLs with offline intelligence and online security checks."
+                                   Foreground="#A9C2D5"
+                                   FontSize="13"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   Margin="0,4,0,0"/>
+
+                        </StackPanel>
+
+                        <!-- URL SEARCH CARD -->
+
+                        <Border Background="{StaticResource GlassCardBrush}"
+                            CornerRadius="16"
+                            Padding="22,14"
+                            HorizontalAlignment="Stretch"
+                            BorderBrush="#2C5C7E"
+                            BorderThickness="1">
+
+                            <Border.Effect>
+                                <DropShadowEffect BlurRadius="24"
+                                              ShadowDepth="6"
+                                              Opacity="0.3"
+                                              Color="#000000"/>
+                            </Border.Effect>
+
+                            <StackPanel>
+
+                                <TextBlock Text="Enter a URL to inspect"
+                                       FontSize="13"
+                                       FontWeight="SemiBold"
+                                       Foreground="#D9EAF7"
+                                       Margin="2,0,0,8"/>
+
+                                <Grid>
+
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <Border Grid.Column="0"
+                                        Background="#0B1E31"
+                                        BorderBrush="#2A5272"
+                                        BorderThickness="1"
+                                        CornerRadius="10"
+                                        Padding="13,0"
+                                        Height="42">
+
+                                        <DockPanel>
+
+                                            <TextBlock Text="⌕"
+                                                   FontSize="20"
+                                                   Foreground="#6FA5C2"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,9,0"/>
+
+                                            <TextBox x:Name="LinkTextBox"
+                                                 BorderThickness="0"
+                                                 Background="Transparent"
+                                                 FontSize="14"
+                                                 Foreground="#EAF5FF"
+                                                 CaretBrush="#EAF5FF"
+                                                 SelectionBrush="#08A9D6"
+                                                 VerticalContentAlignment="Center"
+                                                 Padding="0"
+                                                 ToolTip="Paste the URL here"/>
+
+                                        </DockPanel>
+                                    </Border>
+
+                                    <Button x:Name="CheckButton"
+                                        Grid.Column="1"
+                                        Content="Scan URL  →"
+                                        Height="42"
+                                        Margin="12,0,0,0"
+                                        IsDefault="True"
+                                        Style="{StaticResource PrimaryButton}"
+                                        Click="CheckButton_Click"/>
+
+                                </Grid>
+
+                                <!-- ONLINE STATUS -->
+
+                                <StackPanel Orientation="Horizontal"
+                                        VerticalAlignment="Center"
+                                        Margin="2,10,0,0">
+
+                                    <ToggleButton x:Name="OnlineToggle"
+                                              Style="{StaticResource OnlineToggleStyle}"
+                                              Content="Checking..."
+                                              IsChecked="False"
+                                              IsHitTestVisible="False"
+                                              Checked="OnlineToggle_Changed"
+                                              Unchecked="OnlineToggle_Changed"/>
+
+                                    <Ellipse x:Name="CheckingSpinner"
+                                         Width="14"
+                                         Height="14"
+                                         Margin="10,0,0,0"
+                                         Stroke="#08A9D6"
+                                         StrokeThickness="2"
+                                         StrokeDashArray="3 2"
+                                         RenderTransformOrigin="0.5,0.5"
+                                         VerticalAlignment="Center">
+
+                                        <Ellipse.RenderTransform>
+                                            <RotateTransform x:Name="SpinnerRotate"/>
+                                        </Ellipse.RenderTransform>
+
+                                        <Ellipse.Triggers>
+                                            <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                                                <BeginStoryboard>
+                                                    <Storyboard RepeatBehavior="Forever">
+                                                        <DoubleAnimation
+                                                        Storyboard.TargetName="SpinnerRotate"
+                                                        Storyboard.TargetProperty="Angle"
+                                                        From="0"
+                                                        To="360"
+                                                        Duration="0:0:1"/>
+                                                    </Storyboard>
+                                                </BeginStoryboard>
+                                            </EventTrigger>
+                                        </Ellipse.Triggers>
+
+                                    </Ellipse>
+
+                                    <TextBlock Text="Offline checks are always available"
+                                           Foreground="#8FB0C6"
+                                           FontSize="11"
+                                           VerticalAlignment="Center"
+                                           Margin="10,0,0,0"/>
+
+                                </StackPanel>
+
+                            </StackPanel>
+                        </Border>
+
+                        <!-- EMPTY HINT -->
+
+                        <TextBlock x:Name="EmptyHint"
+                               Margin="0,10,0,0"
+                               Text="Paste a link above and select Scan URL to view its security assessment."
+                               Foreground="#B5C9D8"
+                               FontSize="12"
+                               HorizontalAlignment="Center"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center"/>
+
+                    </StackPanel>
+
+
 
                     <!-- ========================================== -->
                     <!-- RESULT PANEL - NEW DARK DESIGN             -->
@@ -865,7 +969,8 @@
                                       SelectionMode="Single"
                                       SelectionUnit="FullRow"
                                       HorizontalScrollBarVisibility="Auto"
-                                      VerticalScrollBarVisibility="Auto">
+                                      VerticalScrollBarVisibility="Disabled"
+                                      PreviewMouseWheel="ResultGrid_PreviewMouseWheel">
 
                                 <DataGrid.Resources>
 

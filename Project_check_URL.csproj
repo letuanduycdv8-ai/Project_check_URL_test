@@ -138,6 +138,7 @@
     <Content Include="Data\confusables.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Resource Include="Picture\app_icon.png" />
     <Resource Include="Picture\homeground.jpg" />
     <Resource Include="Picture\information Icon.png" />
     <Resource Include="Picture\Export.png" />

@@ -90,7 +90,7 @@ namespace Project_check_URL.View
                 _netCts?.Cancel();
             };
 
-            _ = RefreshNetworkAsync();  
+            _ = RefreshNetworkAsync();
         }
 
         private void SetChecking(bool busy)
@@ -126,11 +126,11 @@ namespace Project_check_URL.View
             }
 
             OnlineToggle.IsChecked = online;
-            ApplyNetworkState();            
+            ApplyNetworkState();
             StatusText.Text = "Ready";
         }
 
-        
+
         private void OnNetworkChanged(object sender, NetworkAvailabilityEventArgs e)
             => _ = DebouncedRefreshAsync();
 
@@ -261,7 +261,7 @@ namespace Project_check_URL.View
                 reputation.Level = (r.Malicious + r.Suspicious) > 0 ? "Warning" : "Safe";
 
                 redirects.Finding = Convert.ToString(r_2.StatusCode);
-                redirects.Level = (300 < r_2.StatusCode || r_2.StatusCode < 400) ? "Warning" : "Safe";
+                redirects.Level = (300 < r_2.StatusCode && r_2.StatusCode < 400) ? "Warning" : "Safe";
 
                 StatusText.Text = "Checked: " + uri.Host;
             }
@@ -285,7 +285,7 @@ namespace Project_check_URL.View
             }
 
             if (myId == _checkId)
-                UpdateVerdict(items);   
+                UpdateVerdict(items);
         }
 
         // Gom phần hiển thị + verdict để gọi lại sau khi có kết quả online
@@ -295,9 +295,20 @@ namespace Project_check_URL.View
             CheckedUrlText.Text = input;
             UpdateVerdict(items);
 
+            // Có kết quả: ẩn phần tiêu đề để bảng kết quả chiếm gần hết màn hình,
+            // ô nhập URL nằm gọn phía trên và sẽ cuộn lên cùng trang khi lăn chuột.
+            HeroText.Visibility = Visibility.Collapsed;
             EmptyHint.Visibility = Visibility.Collapsed;
             PipelineOverview.Visibility = Visibility.Collapsed;
             ResultPanel.Visibility = Visibility.Visible;
+            PageScroll.ScrollToTop();
+        }
+
+        // DataGrid nuốt sự kiện lăn chuột; chuyển nó cho ScrollViewer của cả trang
+        private void ResultGrid_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            PageScroll.ScrollToVerticalOffset(PageScroll.VerticalOffset - e.Delta * 0.8);
+            e.Handled = true;
         }
         private void UpdateVerdict(List<CheckItem> items)
         {
@@ -319,7 +330,9 @@ namespace Project_check_URL.View
             ResultGrid.ItemsSource = null;
             ResultPanel.Visibility = Visibility.Collapsed;
             PipelineOverview.Visibility = Visibility.Visible;
+            HeroText.Visibility = Visibility.Visible;
             EmptyHint.Visibility = Visibility.Visible;
+            PageScroll.ScrollToTop();
             StatusText.Text = "Ready";
             _checkId++;
             _lastItems = null;

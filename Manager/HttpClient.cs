@@ -252,7 +252,7 @@ namespace Project_check_URL
         }
 
         // Kiểm tra sớm scheme và IP literal; lớp chặn chính là kiểm tra IP sau khi phân giải ở RunAsync
-        private static string PreCheckTarget(Uri uri)
+        internal static string PreCheckTarget(Uri uri)
         {
             if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
                 return "Unsupported scheme: " + uri.Scheme;
@@ -452,7 +452,7 @@ namespace Project_check_URL
         }
 
         // ===== IP có phải địa chỉ công khai không =====
-        private static bool IsPublicAddress(IPAddress ip)
+        internal static bool IsPublicAddress(IPAddress ip)
         {
             byte[] b = ip.GetAddressBytes();
 

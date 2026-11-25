@@ -283,6 +283,125 @@ namespace Project_check_URL.View
         }
 
         // ================================================================
+        // 2B) VirusTotal chi tiết, dữ liệu từ VT_response.cs (VtReport / VtVerdict)
+        //
+        // Phân chia trách nhiệm để không lặp nội dung:
+        //  - Kết luận chung (Level, Finding, Assessment) do HomeView gán vào CheckItem;
+        //    DetailView hiện Assessment ở hộp ASSESSMENT của thẻ, nên Details KHÔNG lặp lại.
+        //  - Blacklist  : engine nào gắn cờ và nhãn đó nghĩa là gì.
+        //  - Reputation : engine nào xếp harmless / undetected, độ phủ.
+        // ================================================================
+
+        private static List<DetailLine> VtHeader(VtReport r)
+        {
+            var d = new List<DetailLine>();
+
+            d.Add(new DetailLine("Analysis ID", r.AnalysisId));
+            d.Add(new DetailLine("Status", r.Status));
+
+            if (r.ScanDateUtc.HasValue)
+                d.Add(new DetailLine("Scan date", Utc(r.ScanDateUtc.Value)));
+
+            if (!string.IsNullOrEmpty(r.Url))
+                d.Add(new DetailLine("URL analysed", r.Url));
+
+            d.Add(new DetailLine("Engine verdicts",
+                r.Malicious + " malicious  ·  " +
+                r.Suspicious + " suspicious  ·  " +
+                r.Harmless + " harmless  ·  " +
+                r.Undetected + " undetected  ·  " +
+                r.Timeout + " timeout"));
+
+            d.Add(new DetailLine("Engines responded",
+                r.Responding + " of " + r.TotalEngines));
+
+            d.Add(new DetailLine("VirusTotal page",
+                r.VtPageUrl ?? "Not available"));
+
+            return d;
+        }
+
+        // BLACKLIST: engine gắn cờ malicious / suspicious, kèm nghĩa của nhãn
+        public static List<DetailLine> ForBlacklist(VtReport r, VtVerdict verdict)
+        {
+            List<DetailLine> d = VtHeader(r);
+
+            if (verdict != null)
+                d.Add(new DetailLine("Confidence", verdict.Confidence));
+
+            int listed = 0;
+            foreach (string category in new[] { "malicious", "suspicious" })
+            {
+                List<EngineVerdict> engines = r.Flagged(category);
+                if (engines.Count == 0) continue;
+
+                listed += engines.Count;
+                d.Add(Heading("Flagged as " + category + " (" + engines.Count + ")"));
+
+                foreach (EngineVerdict e in engines)
+                {
+                    string label = string.IsNullOrWhiteSpace(e.Result) ? category : e.Result;
+                    d.Add(new DetailLine(e.Engine, label + "  -  " + VtVerdictBuilder.Meaning(e)));
+                }
+            }
+
+            if (listed == 0)
+            {
+                int flagged = r.Malicious + r.Suspicious;
+                d.Add(new DetailLine("Flagged by", flagged == 0
+                    ? "No engine flagged this URL"
+                    : "The response did not list which engines flagged it (" + flagged + " in the summary)"));
+            }
+
+            return d;
+        }
+
+        // REPUTATION: engine harmless / undetected / loại khác (timeout...)
+        public static List<DetailLine> ForReputation(VtReport r)
+        {
+            List<DetailLine> d = VtHeader(r);
+
+            if (r.Engines.Count == 0)
+            {
+                d.Add(new DetailLine("Engines", "The response did not include per-engine results."));
+                return d;
+            }
+
+            AddEngineNames(d, r, "harmless", "Harmless");
+            AddEngineNames(d, r, "undetected", "Undetected");
+
+            List<EngineVerdict> other = r.Engines
+                .Where(e => !IsOneOf(e.Category, "malicious", "suspicious", "harmless", "undetected"))
+                .ToList();
+            if (other.Count > 0)
+            {
+                d.Add(Heading("Other (" + other.Count + ")"));
+                foreach (EngineVerdict e in other)
+                    d.Add(new DetailLine(e.Engine, e.Category ?? "Unknown"));
+            }
+
+            return d;
+        }
+
+        private static bool IsOneOf(string value, params string[] options)
+        {
+            return options.Any(o => string.Equals(value, o, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static void AddEngineNames(List<DetailLine> d, VtReport r, string category, string title)
+        {
+            List<string> names = r.Engines
+                .Where(e => string.Equals(e.Category, category, StringComparison.OrdinalIgnoreCase))
+                .Select(e => e.Engine)
+                .ToList();
+
+            if (names.Count == 0) return;
+
+            d.Add(Heading(title + " (" + names.Count + ")"));
+            d.Add(new DetailLine("Engines", string.Join(", ", names)));
+        }
+
+        // ================================================================
         // 3) HTML check: phản hồi của máy chủ
         // ================================================================
 

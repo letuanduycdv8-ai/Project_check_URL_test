@@ -191,7 +191,6 @@
         </Style>
 
         <!-- ================= HEADER MENU ================= -->
-
         <Style x:Key="HeaderMenuItemStyle" TargetType="MenuItem">
             <Setter Property="Foreground" Value="#EAF5FF"/>
             <Setter Property="FontSize" Value="13"/>
@@ -201,10 +200,25 @@
             <Setter Property="Background" Value="Transparent"/>
 
             <Style.Triggers>
+                
                 <Trigger Property="IsHighlighted" Value="True">
                     <Setter Property="Background" Value="#193D5B"/>
                     <Setter Property="Foreground" Value="#5EDBFF"/>
                 </Trigger>
+
+                
+                <Trigger Property="Role" Value="SubmenuItem">
+                    <Setter Property="Foreground" Value="#0B1F33"/>
+                </Trigger>
+
+                <MultiTrigger>
+                    <MultiTrigger.Conditions>
+                        <Condition Property="Role" Value="SubmenuItem"/>
+                        <Condition Property="IsHighlighted" Value="True"/>
+                    </MultiTrigger.Conditions>
+                    <Setter Property="Foreground" Value="#0B1F33"/>
+                    <Setter Property="Background" Value="#CFE8F7"/>
+                </MultiTrigger>
             </Style.Triggers>
         </Style>
 
@@ -415,7 +429,7 @@
                       HorizontalAlignment="Right"
                       VerticalAlignment="Center"
                       Background="Transparent"
-                      Foreground="#EAF5FF">
+                      Foreground="Black">
 
                     <Menu.Resources>
                         <Style TargetType="MenuItem"
@@ -423,8 +437,9 @@
                     </Menu.Resources>
 
                     <MenuItem Header="_File">
-                        <MenuItem Header="_Information more about URL"/>
+                        <MenuItem Header="_Information more about URL" Click="Show_information"/>
                         <MenuItem Header="_Export report"/>
+                        <MenuItem Header="Clear" Click="ClearButton_Click"/>
                         <Separator/>
                         <MenuItem Header="_Sign out"/>
                     </MenuItem>
@@ -455,23 +470,6 @@
                         <StackPanel Orientation="Horizontal"
                                     DockPanel.Dock="Left">
 
-                            <Button Style="{StaticResource QuickActionButton}"
-                                    ToolTip="More information"
-                                    Click="Show_information"
-                                    MouseEnter="Tool_Enter"
-                                    MouseLeave="Leave"
-                                    Tag="Show more information about us">
-
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="ⓘ"
-                                               FontSize="14"
-                                               Margin="0,0,6,0"
-                                               VerticalAlignment="Center"/>
-                                    <TextBlock Text="Information"
-                                               VerticalAlignment="Center"/>
-                                </StackPanel>
-
-                            </Button>
 
                             <Button Style="{StaticResource QuickActionButton}"
                                     ToolTip="Clear the result"
@@ -480,14 +478,7 @@
                                     MouseLeave="Leave"
                                     Tag="Clear the result, you can add new URL">
 
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="⌫"
-                                               FontSize="14"
-                                               Margin="0,0,6,0"
-                                               VerticalAlignment="Center"/>
-                                    <TextBlock Text="Clear"
-                                               VerticalAlignment="Center"/>
-                                </StackPanel>
+                                <Image Source="/Picture/Clean.png"  Height="20" Width="Auto"/>
 
                             </Button>
 
@@ -497,14 +488,7 @@
                                     MouseLeave="Leave"
                                     Tag="Export the full result">
 
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="⇩"
-                                               FontSize="14"
-                                               Margin="0,0,6,0"
-                                               VerticalAlignment="Center"/>
-                                    <TextBlock Text="Export"
-                                               VerticalAlignment="Center"/>
-                                </StackPanel>
+                                <Image Source="/Picture/Export.png"  Height="20" Width="Auto"/>
 
                             </Button>
 
@@ -514,18 +498,20 @@
                                     MouseEnter="Tool_Enter"
                                     MouseLeave="Leave"
                                     Tag="Show the history links URL you had checked">
-
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="◷"
-                                               FontSize="14"
-                                               Margin="0,0,6,0"
-                                               VerticalAlignment="Center"/>
-                                    <TextBlock Text="History"
-                                               VerticalAlignment="Center"/>
-                                </StackPanel>
-
+                                <Image Source="/Picture/History.jpg"  Height="20" Width="Auto"/>
                             </Button>
 
+
+                            <Button Style="{StaticResource QuickActionButton}"
+                                    ToolTip="More information"
+                                    Click="Show_information"
+                                    MouseEnter="Tool_Enter"
+                                    MouseLeave="Leave"
+                                    Tag="Show more information about us">
+
+                                <Image Source="/Picture/information Icon.png" Height="20" Width="Auto"/>
+
+                            </Button>
                         </StackPanel>
 
                         <TextBlock DockPanel.Dock="Right"
@@ -555,7 +541,8 @@
                             <Image x:Name="ToolbarImage"
                                    Margin="2"
                                    Stretch="Uniform"
-                                   RenderOptions.BitmapScalingMode="HighQuality"/>
+                                   RenderOptions.BitmapScalingMode="HighQuality"
+                                   Source="/Picture/app_icon.png"/>
 
                         </Grid>
 

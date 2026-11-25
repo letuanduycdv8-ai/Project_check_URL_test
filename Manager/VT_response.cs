@@ -165,7 +165,9 @@ namespace Project_check_URL
             {
                 v.Level = "Warning";
                 v.Confidence = r.Malicious == 2 ? "Medium" : "Low";
-                v.Assessment = (r.Malicious == 2 ? "Medium" : "Low") + " confidence. Only " + names + " flagged this URL as " + label
+                // results[] có thể rỗng dù stats báo có engine gắn cờ: khi đó chỉ nêu số lượng
+                string who = names.Length > 0 ? names : (r.Malicious == 1 ? "1 engine" : r.Malicious + " engines");
+                v.Assessment = (r.Malicious == 2 ? "Medium" : "Low") + " confidence. Only " + who + " flagged this URL as " + label
                     + (r.Suspicious > 0 ? ", and " + r.Suspicious + " more marked it suspicious" : "")
                     + ", while " + r.Harmless + " engines reported it as harmless. A few detections can be a false positive, especially on well-known or developer sites. Check that the address is what you expect and avoid entering personal data until you are sure." + timeoutNote;
                 return v;
@@ -175,7 +177,8 @@ namespace Project_check_URL
             if (r.Suspicious >= 1)
             {
                 v.Level = "Warning"; v.Confidence = "Low";
-                v.Assessment = "Low confidence. " + Names(sus) + " marked this URL as suspicious, but no engine confirmed it as malicious. Treat it with caution and avoid entering personal data." + timeoutNote;
+                string susWho = sus.Count > 0 ? Names(sus) : (r.Suspicious == 1 ? "1 engine" : r.Suspicious + " engines");
+                v.Assessment = "Low confidence. " + susWho + " marked this URL as suspicious, but no engine confirmed it as malicious. Treat it with caution and avoid entering personal data." + timeoutNote;
                 return v;
             }
 
@@ -210,8 +213,14 @@ namespace Project_check_URL
             return s;
         }
 
-        // Giải thích nghĩa của nhãn. VirusTotal không cung cấp lý do chi tiết hơn
+        // "Engine: nhãn - nghĩa" (dùng cho Reasons)
         private static string Explain(EngineVerdict e)
+        {
+            return e.Engine + ": " + e.Result + " - " + Meaning(e);
+        }
+
+        // Nghĩa của nhãn. VirusTotal không cung cấp lý do chi tiết hơn
+        internal static string Meaning(EngineVerdict e)
         {
             string res = (e.Result ?? "").ToLowerInvariant();
             string meaning;
@@ -220,7 +229,7 @@ namespace Project_check_URL
             else if (res.Contains("spam")) meaning = "reported as a source of spam";
             else if (string.Equals(e.Category, "suspicious", StringComparison.OrdinalIgnoreCase)) meaning = "looks unusual but is not confirmed as harmful";
             else meaning = "flagged by this engine's blocklist; VirusTotal does not give a more specific reason";
-            return e.Engine + ": " + e.Result + " - " + meaning;
+            return meaning;
         }
     }
 }

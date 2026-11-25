@@ -35,7 +35,7 @@ namespace Project_check_URL.View
 
     public class CheckItem : INotifyPropertyChanged
     {
-        private string _finding, _level;
+        private string _finding, _level, _assessment;
         private List<DetailLine> _details = new List<DetailLine>();
 
         public string Criterion { get; set; }
@@ -50,6 +50,14 @@ namespace Project_check_URL.View
         {
             get { return _level; }
             set { _level = value; OnPropertyChanged(); }
+        }
+
+        // Đánh giá riêng của mục này (nếu có), hiện ở hộp ASSESSMENT của màn hình Detail.
+        // Để trống thì Detail dùng lời khuyên chung theo Level.
+        public string Assessment
+        {
+            get { return _assessment; }
+            set { _assessment = value; OnPropertyChanged(); }
         }
 
         // Nội dung chi tiết (những gì đã tải và kiểm tra được) cho màn hình Detail.
@@ -242,14 +250,34 @@ namespace Project_check_URL.View
             CheckItem redirects = null, reputation = null, contentType = null, blacklist = null;
             if (OnlineMode)
             {
-                redirects = new CheckItem { Criterion = "Redirects", Finding = "Scanning...", Level = "Warning",
-                    Details = CheckDetails.Pending("Waiting for the server to answer...") };
-                reputation = new CheckItem { Criterion = "Reputation", Finding = "Scanning...", Level = "Warning",
-                    Details = CheckDetails.Pending("Waiting for VirusTotal to finish the scan...") };
-                contentType = new CheckItem { Criterion = "Content-Type", Finding = "Scanning...", Level = "Warning",
-                    Details = CheckDetails.Pending("Waiting for the server to answer...") };
-                blacklist = new CheckItem { Criterion = "Blacklist", Finding = "Scanning...", Level = "Warning",
-                    Details = CheckDetails.Pending("Waiting for VirusTotal to finish the scan...") };
+                redirects = new CheckItem
+                {
+                    Criterion = "Redirects",
+                    Finding = "Scanning...",
+                    Level = "Warning",
+                    Details = CheckDetails.Pending("Waiting for the server to answer...")
+                };
+                reputation = new CheckItem
+                {
+                    Criterion = "Reputation",
+                    Finding = "Scanning...",
+                    Level = "Warning",
+                    Details = CheckDetails.Pending("Waiting for VirusTotal to finish the scan...")
+                };
+                contentType = new CheckItem
+                {
+                    Criterion = "Content-Type",
+                    Finding = "Scanning...",
+                    Level = "Warning",
+                    Details = CheckDetails.Pending("Waiting for the server to answer...")
+                };
+                blacklist = new CheckItem
+                {
+                    Criterion = "Blacklist",
+                    Finding = "Scanning...",
+                    Level = "Warning",
+                    Details = CheckDetails.Pending("Waiting for VirusTotal to finish the scan...")
+                };
                 items.Add(redirects);
                 items.Add(reputation);
                 items.Add(contentType);
@@ -297,6 +325,8 @@ namespace Project_check_URL.View
         }
 
         // Quét VirusTotal rồi điền vào hàng Reputation và Blacklist. Trả về false nếu lỗi.
+        //  - HomeView nhận kết luận chung: Finding + Level (từ VtVerdict).
+        //  - DetailView nhận Assessment và Details (từ VtReport / VtVerdict).
         private async Task<bool> FillVirusTotalAsync(string url, int myId, CheckItem reputation, CheckItem blacklist)
         {
             try
@@ -305,15 +335,54 @@ namespace Project_check_URL.View
 
                 if (myId != _checkId) return true;   // kết quả cũ, bỏ
 
-                int total = r.Malicious + r.Suspicious + r.Harmless + r.Undetected;
+                // JSON gốc đã được API_request lưu vào RAM: phân tích chi tiết bằng VT_response
+                VtReport report = null;
+                VtVerdict verdict = null;
+                try
+                {
+                    string rawJson = VT_ScanStore.Load(r.AnalysisId);
+                    if (!string.IsNullOrWhiteSpace(rawJson))
+                    {
+                        report = VtReport.Parse(r.AnalysisId, rawJson);
+                        verdict = VtVerdictBuilder.Build(report);
+                    }
+                }
+                catch (Exception parseEx)
+                {
+                    System.Diagnostics.Debug.WriteLine("VT_response error: " + parseEx.Message);
+                    report = null;
+                    verdict = null;
+                }
 
-                blacklist.Finding = r.Malicious + " malicious, " + r.Suspicious + " suspicious (of " + total + " engines)";
-                blacklist.Level = r.Malicious > 0 ? "Danger" : r.Suspicious > 0 ? "Warning" : "Safe";
-                blacklist.Details = CheckDetails.ForBlacklist(r);
+                if (verdict != null)
+                {
+                    // Blacklist: kết luận chung lấy từ verdict để Home và Detail luôn khớp nhau
+                    blacklist.Finding = verdict.Finding;
+                    blacklist.Level = CardLevel(verdict.Level);
+                    blacklist.Assessment = verdict.Assessment;
+                    blacklist.Details = CheckDetails.ForBlacklist(report, verdict);
 
-                reputation.Finding = r.Harmless + " harmless, " + r.Undetected + " undetected";
-                reputation.Level = (r.Malicious + r.Suspicious) > 0 ? "Warning" : "Safe";
-                reputation.Details = CheckDetails.ForReputation(r);
+                    // Reputation: có engine gắn cờ, hoặc độ phủ quá thấp (verdict Unknown) thì không báo Safe
+                    reputation.Finding = report.Harmless + " harmless, " + report.Undetected + " undetected";
+                    reputation.Level = (report.Malicious + report.Suspicious) > 0 || verdict.Level == "Unknown"
+                        ? "Warning" : "Safe";
+                    reputation.Assessment = verdict.Level == "Unknown" ? verdict.Assessment : null;
+                    reputation.Details = CheckDetails.ForReputation(report);
+                }
+                else
+                {
+                    // Không có JSON gốc hoặc không đọc được: dùng số liệu tóm tắt từ API_request
+                    int total = r.Malicious + r.Suspicious + r.Harmless + r.Undetected;
+
+                    blacklist.Finding = r.Malicious + " malicious, " + r.Suspicious + " suspicious (of " + total + " engines)";
+                    blacklist.Level = r.Malicious > 0 ? "Danger" : r.Suspicious > 0 ? "Warning" : "Safe";
+                    blacklist.Details = CheckDetails.ForBlacklist(r);
+
+                    reputation.Finding = r.Harmless + " harmless, " + r.Undetected + " undetected";
+                    reputation.Level = (r.Malicious + r.Suspicious) > 0 ? "Warning" : "Safe";
+                    reputation.Details = CheckDetails.ForReputation(r);
+                }
+
                 return true;
             }
             catch (Exception ex)
@@ -326,6 +395,12 @@ namespace Project_check_URL.View
                 reputation.Details = CheckDetails.ForError("VirusTotal", ex);
                 return false;
             }
+        }
+
+        // Giao diện chỉ có 3 mức Safe / Warning / Danger; "Unknown" của verdict hiện như Warning
+        private static string CardLevel(string level)
+        {
+            return (level == "Safe" || level == "Danger") ? level : "Warning";
         }
 
         // Thăm dò HTTP (không tải body) rồi điền vào hàng Redirects và Content-Type. Trả về false nếu lỗi.
@@ -402,12 +477,6 @@ namespace Project_check_URL.View
             e.Handled = true;
         }
 
-        // DataGrid nuốt sự kiện lăn chuột; chuyển nó cho ScrollViewer của cả trang
-        private void ResultGrid_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
-        {
-            PageScroll.ScrollToVerticalOffset(PageScroll.VerticalOffset - e.Delta * 0.8);
-            e.Handled = true;
-        }
         private void UpdateVerdict(List<CheckItem> items)
         {
             if (items.Any(i => i.Level == "Danger"))

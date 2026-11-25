@@ -74,9 +74,15 @@ namespace Project_check_URL.View
             get { return DetailView.AboutFor(Criterion); }
         }
 
+        // Đánh giá riêng của mục này (vd verdict của VirusTotal) nếu có,
+        // không thì dùng lời khuyên chung theo mức độ
         public string Advice
         {
-            get { return DetailView.AdviceFor(Level); }
+            get
+            {
+                string own = _item.Assessment;
+                return string.IsNullOrWhiteSpace(own) ? DetailView.AdviceFor(Level) : own;
+            }
         }
 
         // thẻ đang được chọn (mở rộng, nổi lên)

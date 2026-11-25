@@ -3,8 +3,9 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Text;
+using System.Net;
 using System.Net.NetworkInformation;
+using System.Text;
 
 namespace Project_check_URL.View
 {
@@ -159,7 +160,12 @@ namespace Project_check_URL.View
             var findings = new List<CheckFinding>();
 
             // IP hosts are handled by other checks
-            if (uri.HostNameType != UriHostNameType.Dns) return findings;
+            if (uri.HostNameType != UriHostNameType.Dns) 
+            {
+                findings.Add(CheckIpHost(uri));
+                
+                return findings;
+            }
 
             string host = uri.IdnHost.TrimEnd('.').ToLowerInvariant();
             string[] labels = host.Split('.');
@@ -238,6 +244,21 @@ namespace Project_check_URL.View
             }
 
             return new CheckFinding("Brand impersonation", "No resemblance to known brands", "Safe");
+        }
+        // IP local : 
+        private static CheckFinding CheckIpHost(Uri uri)
+        {
+            IPAddress ip;
+            if (!IPAddress.TryParse(uri.DnsSafeHost, out ip))
+                return new CheckFinding("IP address",
+                    "Host is not a domain name and cannot be read as an IP address", "Warning");
+
+            if (!ClientMng.IsPublicAddress(ip))
+                return new CheckFinding("IP address",
+                    "Link points to a private or reserved address (" + ip + "), not to a public website", "Danger");
+
+            return new CheckFinding("IP address",
+                "Link uses a raw IP address (" + ip + ") instead of a domain name", "Warning");
         }
 
         // ------------------------------------------------------------------

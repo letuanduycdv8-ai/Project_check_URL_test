@@ -31,6 +31,8 @@ namespace Project_check_URL
         public VtReport() { Engines = new List<EngineVerdict>(); }
 
         public bool IsCompleted { get { return Status == "completed"; } }
+        // Báo cáo có sẵn trên VirusTotal (không phải quét mới); AnalysisId do API_request đặt tiền tố "existing-"
+        public bool IsExisting { get { return AnalysisId != null && AnalysisId.StartsWith("existing-", StringComparison.Ordinal); } }
         public int Responding { get { return Malicious + Suspicious + Harmless; } }
         public int TotalEngines { get { return Responding + Undetected + Timeout; } }
         public string VtPageUrl
@@ -230,6 +232,171 @@ namespace Project_check_URL
             else if (string.Equals(e.Category, "suspicious", StringComparison.OrdinalIgnoreCase)) meaning = "looks unusual but is not confirmed as harmful";
             else meaning = "flagged by this engine's blocklist; VirusTotal does not give a more specific reason";
             return meaning;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Thông tin lấy từ đối tượng URL của VirusTotal (GET /urls/{id}):
+    // điểm cộng đồng, bình chọn, phân loại, lần đầu thấy, số lần gửi...
+    // Mọi trường đều có thể thiếu nên đọc phòng thủ.
+    // ------------------------------------------------------------------
+    internal class VtUrlInfo
+    {
+        public int? Reputation { get; set; }
+        public bool HasVotes { get; set; }
+        public int VotesHarmless { get; set; }
+        public int VotesMalicious { get; set; }
+        public List<KeyValuePair<string, string>> Categories { get; private set; }
+        public List<string> Tags { get; private set; }
+        public List<string> ThreatNames { get; private set; }
+        public DateTime? FirstSeenUtc { get; set; }
+        public DateTime? LastSubmissionUtc { get; set; }
+        public DateTime? LastAnalysisUtc { get; set; }
+        public int TimesSubmitted { get; set; }
+        public string Title { get; set; }
+        public string LastFinalUrl { get; set; }
+        public int? LastHttpCode { get; set; }
+
+        public VtUrlInfo()
+        {
+            Categories = new List<KeyValuePair<string, string>>();
+            Tags = new List<string>();
+            ThreatNames = new List<string>();
+        }
+
+        private static readonly string[] RiskyWords =
+            { "phish", "malware", "malicious", "suspicious", "spam", "scam", "fraud", "newly registered", "newly observed" };
+
+        private static readonly DateTime Epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        public static VtUrlInfo Parse(string json)
+        {
+            var ser = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+            var root = ser.Deserialize<Dictionary<string, object>>(json);
+            var attrs = Obj(Obj(root, "data"), "attributes");
+            var info = new VtUrlInfo();
+            if (attrs == null) return info;
+
+            long n;
+            if (Long(attrs, "reputation", out n)) info.Reputation = (int)n;
+
+            var votes = Obj(attrs, "total_votes");
+            if (votes != null)
+            {
+                info.HasVotes = true;
+                if (Long(votes, "harmless", out n)) info.VotesHarmless = (int)n;
+                if (Long(votes, "malicious", out n)) info.VotesMalicious = (int)n;
+            }
+
+            var cats = Obj(attrs, "categories");
+            if (cats != null)
+                foreach (var kv in cats)
+                    if (kv.Value != null) info.Categories.Add(new KeyValuePair<string, string>(kv.Key, kv.Value.ToString()));
+
+            info.Tags.AddRange(Strings(attrs, "tags"));
+            info.ThreatNames.AddRange(Strings(attrs, "threat_names"));
+
+            info.FirstSeenUtc = Time(attrs, "first_submission_date");
+            info.LastSubmissionUtc = Time(attrs, "last_submission_date");
+            info.LastAnalysisUtc = Time(attrs, "last_analysis_date");
+            if (Long(attrs, "times_submitted", out n)) info.TimesSubmitted = (int)n;
+
+            info.Title = HtmlScan.Clean(Str(attrs, "title"), 200);
+            info.LastFinalUrl = HtmlScan.Clean(Str(attrs, "last_final_url"), 300);
+            if (Long(attrs, "last_http_response_code", out n)) info.LastHttpCode = (int)n;
+            return info;
+        }
+
+        // Những điểm đáng ngại rút ra từ dữ liệu cộng đồng / phân loại. Rỗng nếu không có gì.
+        public List<string> RiskReasons()
+        {
+            var reasons = new List<string>();
+
+            if (Reputation.HasValue && Reputation.Value < 0)
+                reasons.Add("The VirusTotal community reputation score is negative (" + Reputation.Value + ").");
+
+            if (HasVotes && VotesMalicious > VotesHarmless)
+                reasons.Add("More community votes say malicious (" + VotesMalicious + ") than harmless (" + VotesHarmless + ").");
+
+            List<string> risky = Categories
+                .Where(c => RiskyWords.Any(w => (c.Value ?? "").ToLowerInvariant().Contains(w)))
+                .Select(c => c.Key + ": " + HtmlScan.Clean(c.Value, 60))
+                .Take(3).ToList();
+            if (risky.Count > 0)
+                reasons.Add("Categorisation services label it as " + string.Join("; ", risky) + ".");
+
+            if (ThreatNames.Count > 0)
+                reasons.Add("VirusTotal lists threat names: " + string.Join(", ", ThreatNames.Take(5).Select(x => HtmlScan.Clean(x, 60))) + ".");
+
+            return reasons;
+        }
+
+        private static Dictionary<string, object> Obj(Dictionary<string, object> d, string k)
+        {
+            object v;
+            return d != null && d.TryGetValue(k, out v) ? v as Dictionary<string, object> : null;
+        }
+        private static string Str(Dictionary<string, object> d, string k)
+        {
+            object v;
+            return d != null && d.TryGetValue(k, out v) && v != null ? v.ToString() : null;
+        }
+        private static bool Long(Dictionary<string, object> d, string k, out long n)
+        {
+            return long.TryParse(Str(d, k), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out n);
+        }
+        private static DateTime? Time(Dictionary<string, object> d, string k)
+        {
+            long unix;
+            return Long(d, k, out unix) && unix > 0 ? (DateTime?)Epoch.AddSeconds(unix) : null;
+        }
+        private static IEnumerable<string> Strings(Dictionary<string, object> d, string k)
+        {
+            object v;
+            var list = new List<string>();
+            if (d == null || !d.TryGetValue(k, out v) || !(v is System.Collections.IEnumerable) || v is string) return list;
+            foreach (object item in (System.Collections.IEnumerable)v)
+                if (item != null) list.Add(HtmlScan.Clean(item.ToString(), 80));
+            return list;
+        }
+    }
+
+    // Kết luận của thẻ "Reputation" (gom một chỗ để test được, HomeView chỉ gán vào CheckItem)
+    internal class ReputationEval
+    {
+        public string Finding { get; set; }
+        public string Level { get; set; }
+        public string Assessment { get; set; }
+
+        public static ReputationEval Evaluate(VtReport r, VtVerdict v, VtUrlInfo u)
+        {
+            var e = new ReputationEval
+            {
+                // cách tính cũ giữ nguyên: dùng khi chưa có dữ liệu cộng đồng
+                Finding = r.Harmless + " harmless, " + r.Undetected + " undetected",
+                Level = (r.Malicious + r.Suspicious) > 0 || v.Level == "Unknown" ? "Warning" : "Safe",
+                Assessment = v.Level == "Unknown" ? v.Assessment : null
+            };
+
+            if (u == null) return e;
+
+            // "Reputation" trước đây chỉ đếm engine; nay hiện điểm và bình chọn thật của cộng đồng
+            if (u.Reputation.HasValue || u.HasVotes)
+            {
+                string score = u.Reputation.HasValue ? "Score " + u.Reputation.Value : "No score";
+                e.Finding = u.HasVotes
+                    ? score + "  ·  votes " + u.VotesHarmless + " harmless / " + u.VotesMalicious + " malicious"
+                    : score;
+            }
+
+            List<string> reasons = u.RiskReasons();
+            if (reasons.Count > 0)
+            {
+                e.Level = "Warning";
+                string extra = string.Join(" ", reasons);
+                e.Assessment = string.IsNullOrEmpty(e.Assessment) ? extra : e.Assessment + " " + extra;
+            }
+            return e;
         }
     }
 }

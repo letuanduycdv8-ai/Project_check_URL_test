@@ -1,0 +1,1164 @@
+diff --git a/Manager/API_request.cs b/Manager/API_request.cs
+index 0874f61..89b41ff 100644
+--- a/Manager/API_request.cs
++++ b/Manager/API_request.cs
+@@ -2,6 +2,7 @@
+ using System.Collections.Generic;
+ using System.Net;
+ using System.Net.Http;
++using System.Text;
+ using System.Threading.Tasks;
+ using System.Web.Script.Serialization;
+ 
+@@ -20,6 +21,8 @@ namespace Project_check_URL
+         public DateTime? ScanDate { get; set; }          // giờ UTC VirusTotal hoàn tất phân tích
+         public string ScannedUrl { get; set; }           // URL mà VirusTotal ghi nhận
+         public string UrlId { get; set; }                // dùng để mở trang kết quả trên VirusTotal
++        public string UrlObjectJson { get; set; }        // JSON của GET /urls/{id} (điểm cộng đồng, phân loại...), null nếu không lấy được
++        public bool FromExistingReport { get; set; }     // true: dùng báo cáo có sẵn, không quét mới
+         public List<EngineResult> Engines { get; private set; }
+ 
+         public ScanResult()
+@@ -90,13 +93,27 @@ namespace Project_check_URL
+             _apiKey = apiKey;
+         }
+ 
+-        // Gửi URL, chờ quét xong, trả về kết quả.
++        // Báo cáo có sẵn trên VirusTotal chỉ được dùng lại nếu mới hơn mức này
++        private static readonly TimeSpan MaxExistingReportAge = TimeSpan.FromHours(24);
++
++        // Lấy kết quả cho URL. Đường nhanh: nếu VirusTotal đã có báo cáo trong 24 giờ gần đây thì dùng luôn
++        // (1 request, không phải đợi quét, đỡ quota). Nếu không thì gửi quét mới như trước.
+         // Mặc định poll 15 giây/lần để không vượt quota bản free (4 request/phút).
+         public async Task<ScanResult> ScanUrlAsync(string url, int maxAttempts = 8, int delayMs = 15000)
+         {
+             if (string.IsNullOrWhiteSpace(url))
+                 throw new ArgumentException("URL không được để trống.", "url");
+ 
++            // 1) Có báo cáo mới sẵn chưa? Lỗi ở bước này không quan trọng, cứ quét mới.
++            string existingJson = null;
++            try { existingJson = await GetUrlObjectJsonAsync(UrlIdFromText(url)).ConfigureAwait(false); }
++            catch (Exception) { existingJson = null; }
++
++            ScanResult existing = TryBuildFromUrlObject(url, existingJson, DateTime.UtcNow);
++            if (existing != null)
++                return existing;
++
++            // 2) Quét mới
+             string analysisId = await SubmitUrlAsync(url).ConfigureAwait(false);
+ 
+             for (int i = 0; i < maxAttempts; i++)
+@@ -105,7 +122,16 @@ namespace Project_check_URL
+ 
+                 ScanResult result = await GetAnalysisAsync(analysisId).ConfigureAwait(false);
+                 if (result.IsCompleted)
++                {
++                    // 3) Lấy thêm điểm cộng đồng, phân loại... (không bắt buộc: lỗi thì bỏ qua)
++                    try
++                    {
++                        string id = string.IsNullOrEmpty(result.UrlId) ? UrlIdFromText(url) : result.UrlId;
++                        result.UrlObjectJson = await GetUrlObjectJsonAsync(id).ConfigureAwait(false);
++                    }
++                    catch (Exception) { result.UrlObjectJson = null; }
+                     return result;
++                }
+             }
+ 
+             throw new ScanTimeoutException(
+@@ -113,6 +139,74 @@ namespace Project_check_URL
+                 analysisId);
+         }
+ 
++        // ID URL theo VirusTotal: base64 an toàn cho URL (+ -> -, / -> _), bỏ dấu "="
++        internal static string UrlIdFromText(string url)
++        {
++            return Convert.ToBase64String(Encoding.UTF8.GetBytes(url))
++                .TrimEnd('=').Replace('+', '-').Replace('/', '_');
++        }
++
++        // GET /urls/{id}: null nếu VirusTotal chưa từng thấy URL này (404)
++        private async Task<string> GetUrlObjectJsonAsync(string urlId)
++        {
++            using (var request = new HttpRequestMessage(HttpMethod.Get, BaseUrl + "/urls/" + urlId))
++            {
++                request.Headers.Add("x-apikey", _apiKey);
++                return await SendAsync(request, true).ConfigureAwait(false);
++            }
++        }
++
++        // Dựng kết quả từ đối tượng URL có sẵn. Trả null nếu thiếu dữ liệu hoặc báo cáo đã cũ
++        // (khi đó phải quét mới). Dựng lại JSON dạng /analyses để dùng chung VtReport.Parse.
++        internal static ScanResult TryBuildFromUrlObject(string url, string urlJson, DateTime nowUtc)
++        {
++            if (string.IsNullOrWhiteSpace(urlJson)) return null;
++
++            try
++            {
++                Dictionary<string, object> root = Parse(urlJson);
++                Dictionary<string, object> data = GetObject(root, "data");
++                Dictionary<string, object> attrs = GetObject(data, "attributes");
++                if (attrs == null) return null;
++
++                Dictionary<string, object> stats = GetObject(attrs, "last_analysis_stats");
++                Dictionary<string, object> results = GetObject(attrs, "last_analysis_results");
++                object date;
++                if (stats == null || stats.Count == 0 || results == null || results.Count == 0 ||
++                    !attrs.TryGetValue("last_analysis_date", out date) || date == null)
++                    return null;
++
++                long unix = Convert.ToInt64(date);
++                DateTime analysed = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(unix);
++                if (analysed > nowUtc.AddMinutes(5) || nowUtc - analysed > MaxExistingReportAge)
++                    return null;
++
++                string urlId = GetString(data, "id") ?? UrlIdFromText(url);
++                var synthetic = new Dictionary<string, object>
++                {
++                    { "data", new Dictionary<string, object> { { "attributes", new Dictionary<string, object> {
++                        { "status", "completed" }, { "date", unix }, { "stats", stats }, { "results", results } } } } },
++                    { "meta", new Dictionary<string, object> { { "url_info", new Dictionary<string, object> {
++                        { "id", urlId }, { "url", GetString(attrs, "url") ?? url } } } } }
++                };
++
++                string json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Serialize(synthetic);
++                string analysisId = "existing-" + urlId;
++
++                ScanResult r = ParseSummary(analysisId, json);
++                if (!r.IsCompleted) return null;
++
++                VT_ScanStore.Save(analysisId, json);
++                r.UrlObjectJson = urlJson;
++                r.FromExistingReport = true;
++                return r;
++            }
++            catch (Exception)
++            {
++                return null;     // dữ liệu lạ: quét mới cho chắc
++            }
++        }
++
+         // Bước 1: gửi URL, nhận analysis ID
+         public async Task<string> SubmitUrlAsync(string url)
+         {
+@@ -278,12 +372,16 @@ namespace Project_check_URL
+         // ---------- HTTP ----------
+ 
+         // Gửi request và xử lý lỗi HTTP
+-        private static async Task<string> SendAsync(HttpRequestMessage request)
++        // nullOn404 = true: 404 (chưa có dữ liệu) trả về null thay vì ném lỗi
++        private static async Task<string> SendAsync(HttpRequestMessage request, bool nullOn404 = false)
+         {
+             using (HttpResponseMessage response = await ClientMng.Client.SendAsync(request).ConfigureAwait(false))
+             {
+                 string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+ 
++                if (nullOn404 && response.StatusCode == HttpStatusCode.NotFound)
++                    return null;
++
+                 if (response.IsSuccessStatusCode)
+                     return body;
+ 
+diff --git a/Manager/DomainInfo.cs b/Manager/DomainInfo.cs
+new file mode 100644
+index 0000000..6c25437
+--- /dev/null
++++ b/Manager/DomainInfo.cs
+@@ -0,0 +1,189 @@
++using System;
++using System.Collections.Generic;
++using System.Globalization;
++using System.Linq;
++using System.Net;
++using System.Net.Http;
++using System.Threading;
++using System.Threading.Tasks;
++using System.Web.Script.Serialization;
++using Project_check_URL.View;
++
++namespace Project_check_URL
++{
++    // ------------------------------------------------------------------
++    // Tiện ích về tên miền dùng chung cho phân tích redirect / HTML / RDAP
++    // ------------------------------------------------------------------
++    internal static class DomainUtil
++    {
++        // Dịch vụ rút gọn link phổ biến: đích thật của link bị che
++        private static readonly HashSet<string> Shorteners =
++            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
++            {
++                "bit.ly", "t.co", "tinyurl.com", "goo.gl", "is.gd", "v.gd", "ow.ly", "buff.ly",
++                "rebrand.ly", "cutt.ly", "shorturl.at", "t.ly", "rb.gy", "tiny.cc", "lnkd.in",
++                "bit.do", "s.id", "adf.ly", "shorte.st", "qr.net", "urlz.fr", "tr.ee", "rebrand.ly"
++            };
++
++        // Tên miền đăng ký được (eTLD+1) dùng bảng hậu tố của Offline_check. Host là IP thì trả nguyên host.
++        public static string Registrable(string host)
++        {
++            if (string.IsNullOrWhiteSpace(host)) return null;
++            host = host.Trim().Trim('[', ']').TrimEnd('.').ToLowerInvariant();
++            IPAddress ip;
++            if (IPAddress.TryParse(host, out ip)) return host;
++            return Offline_check.GetRegistrableDomain(host.Split('.'));
++        }
++
++        public static bool SameSite(string hostA, string hostB)
++        {
++            return string.Equals(Registrable(hostA), Registrable(hostB), StringComparison.OrdinalIgnoreCase);
++        }
++
++        public static bool IsShortener(string host)
++        {
++            if (string.IsNullOrWhiteSpace(host)) return false;
++            string reg = Registrable(host);
++            return reg != null && Shorteners.Contains(reg);
++        }
++    }
++
++    // ------------------------------------------------------------------
++    // Tuổi tên miền qua RDAP (miễn phí, không cần API key).
++    // Chỉ chạy ở chế độ Online. Tên miền đang kiểm tra được gửi tới rdap.org.
++    // ------------------------------------------------------------------
++    internal class DomainAgeResult
++    {
++        public string Domain { get; set; }
++        public string Source { get; set; }
++        public DateTime? Registered { get; set; }
++        public DateTime? LastChanged { get; set; }
++        public DateTime? Expires { get; set; }
++        public string Error { get; set; }
++
++        public int? AgeDays
++        {
++            get
++            {
++                if (!Registered.HasValue) return null;
++                return Math.Max(0, (int)(DateTime.UtcNow - Registered.Value).TotalDays);
++            }
++        }
++
++        public bool IsNew { get { return AgeDays.HasValue && AgeDays.Value < NewDomainDays; } }
++
++        public const int NewDomainDays = 30;
++
++        // Nội dung đánh giá khi tên miền quá mới; null nếu không có gì đáng nói
++        public string Assessment
++        {
++            get
++            {
++                if (!IsNew) return null;
++                int d = AgeDays.Value;
++                return "This domain was registered " + (d == 0 ? "today" : d + (d == 1 ? " day ago" : " days ago")) +
++                       ". Phishing and scam sites very often use brand-new domains. " +
++                       "Be careful with any login, payment or download on it.";
++            }
++        }
++
++        public static DomainAgeResult Failed(string domain, string error)
++        {
++            return new DomainAgeResult { Domain = domain, Source = "rdap.org", Error = error };
++        }
++    }
++
++    internal static class DomainAgeClient
++    {
++        private static readonly HttpClient Client = CreateClient();
++
++        private static HttpClient CreateClient()
++        {
++            var handler = new HttpClientHandler
++            {
++                AllowAutoRedirect = true,
++                MaxAutomaticRedirections = 3,
++                UseCookies = false
++            };
++            var c = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10), MaxResponseContentBufferSize = 512 * 1024 };
++            c.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/rdap+json, application/json");
++            c.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "LinkGuard-URL-Checker/1.0");
++            return c;
++        }
++
++        public static async Task<DomainAgeResult> LookupAsync(string idnHost, CancellationToken token)
++        {
++            string host = (idnHost ?? "").Trim().TrimEnd('.').ToLowerInvariant();
++            IPAddress ip;
++            if (host.Length == 0 || IPAddress.TryParse(host.Trim('[', ']'), out ip))
++                return DomainAgeResult.Failed(host, "The host is an IP address, so there is no domain registration.");
++
++            string[] labels = host.Split('.');
++            string reg = Offline_check.GetRegistrableDomain(labels);
++            int regLabels = reg.Split('.').Length;
++
++            var candidates = new List<string> { reg };
++            // Hậu tố 2 cấp chưa có trong bảng: nếu bản ghi của "co.uk" kiểu đó không tồn tại, thử thêm một nhãn
++            if (labels.Length > regLabels)
++                candidates.Add(string.Join(".", labels.Skip(labels.Length - (regLabels + 1))));
++
++            string lastError = "No registration record was found.";
++            foreach (string candidate in candidates)
++            {
++                token.ThrowIfCancellationRequested();
++                using (var request = new HttpRequestMessage(HttpMethod.Get, "https://rdap.org/domain/" + candidate))
++                using (HttpResponseMessage response = await Client.SendAsync(request, token).ConfigureAwait(false))
++                {
++                    if (response.StatusCode == HttpStatusCode.NotFound) { lastError = "No registration record was found for " + candidate + "."; continue; }
++                    if ((int)response.StatusCode == 429) return DomainAgeResult.Failed(candidate, "The RDAP service is busy (rate limit). Try again later.");
++                    if (!response.IsSuccessStatusCode) return DomainAgeResult.Failed(candidate, "RDAP error " + (int)response.StatusCode + ".");
++
++                    string json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
++                    DomainAgeResult r = Parse(candidate, json);
++                    if (r.Registered.HasValue || r.Error != null) return r;
++                    lastError = "The record has no registration date.";
++                }
++            }
++            return DomainAgeResult.Failed(reg, lastError);
++        }
++
++        // Đọc phần tử events của RDAP (tách riêng để test được)
++        internal static DomainAgeResult Parse(string domain, string json)
++        {
++            var result = new DomainAgeResult { Domain = domain, Source = "rdap.org" };
++            try
++            {
++                var ser = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
++                var root = ser.Deserialize<Dictionary<string, object>>(json);
++                object ev;
++                if (root == null || !root.TryGetValue("events", out ev) || !(ev is System.Collections.IEnumerable))
++                    return result;
++
++                foreach (object item in (System.Collections.IEnumerable)ev)
++                {
++                    var e = item as Dictionary<string, object>;
++                    if (e == null) continue;
++                    object action, date;
++                    if (!e.TryGetValue("eventAction", out action) || !e.TryGetValue("eventDate", out date)) continue;
++
++                    DateTime t;
++                    if (!DateTime.TryParse(Convert.ToString(date, CultureInfo.InvariantCulture), CultureInfo.InvariantCulture,
++                            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out t))
++                        continue;
++
++                    switch ((Convert.ToString(action) ?? "").ToLowerInvariant())
++                    {
++                        case "registration": result.Registered = t; break;
++                        case "last changed": result.LastChanged = t; break;
++                        case "expiration": result.Expires = t; break;
++                    }
++                }
++            }
++            catch (Exception ex)
++            {
++                result.Error = "Could not read the RDAP answer (" + ex.GetType().Name + ").";
++            }
++            return result;
++        }
++    }
++}
+diff --git a/Manager/HtmlScan.cs b/Manager/HtmlScan.cs
+new file mode 100644
+index 0000000..30727de
+--- /dev/null
++++ b/Manager/HtmlScan.cs
+@@ -0,0 +1,340 @@
++using System;
++using System.Collections.Generic;
++using System.Globalization;
++using System.Linq;
++using System.Net;
++using System.Text;
++using System.Text.RegularExpressions;
++
++namespace Project_check_URL
++{
++    internal class HtmlForm
++    {
++        public string Action { get; set; }     // địa chỉ tuyệt đối (hoặc "(same page)")
++        public string Method { get; set; }
++        public bool HasPassword { get; set; }
++        public bool External { get; set; }     // gửi sang site khác
++        public bool Insecure { get; set; }     // gửi qua HTTP thường
++    }
++
++    internal class HtmlFrame
++    {
++        public string Src { get; set; }
++        public bool Hidden { get; set; }
++        public bool External { get; set; }
++    }
++
++    internal class HtmlScanResult
++    {
++        public string Title { get; set; }
++        public string Charset { get; set; }
++        public int Length { get; set; }
++        public bool Truncated { get; set; }
++        public string MetaRefreshTarget { get; set; }
++        public string MetaRefreshDelay { get; set; }
++        public bool MetaRefreshExternal { get; set; }
++        public int PasswordFields { get; set; }
++        public bool JsRedirectHint { get; set; }
++        public string Note { get; set; }
++        public List<HtmlForm> Forms { get; private set; }
++        public List<HtmlFrame> Frames { get; private set; }
++        public List<string> ExternalScriptHosts { get; private set; }
++        public List<string> Warnings { get; private set; }
++
++        public string Level { get { return Warnings.Count > 0 ? "Warning" : "Safe"; } }
++
++        public HtmlScanResult()
++        {
++            Forms = new List<HtmlForm>();
++            Frames = new List<HtmlFrame>();
++            ExternalScriptHosts = new List<string>();
++            Warnings = new List<string>();
++        }
++    }
++
++    // ------------------------------------------------------------------
++    // Phân tích phần đầu của trang HTML như VĂN BẢN THUẦN: không chạy script,
++    // không tải thêm tài nguyên nào. Mọi regex đều có timeout vì nội dung do
++    // máy chủ (có thể độc hại) quyết định.
++    // ------------------------------------------------------------------
++    internal static class HtmlScan
++    {
++        private static readonly TimeSpan RxTimeout = TimeSpan.FromMilliseconds(500);
++        private const RegexOptions Opt = RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant;
++
++        private static readonly Regex RxScript = new Regex(@"<script\b([^>]*)>(.*?)</script\s*>", Opt, RxTimeout);
++        private static readonly Regex RxStyle = new Regex(@"<style\b[^>]*>.*?</style\s*>", Opt, RxTimeout);
++        private static readonly Regex RxComment = new Regex(@"<!--.*?-->", Opt, RxTimeout);
++        private static readonly Regex RxTitle = new Regex(@"<title\b[^>]*>(.*?)</title\s*>", Opt, RxTimeout);
++        private static readonly Regex RxTag = new Regex(@"<\s*(/?)\s*(form|input|iframe|frame|meta|base)\b([^>]*)>", Opt, RxTimeout);
++        private static readonly Regex RxAttr = new Regex(@"([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:""([^""]*)""|'([^']*)'|([^\s""'>]+))", Opt, RxTimeout);
++        private static readonly Regex RxCharsetMeta = new Regex(@"charset\s*=\s*[""']?\s*([A-Za-z0-9_\-]+)", Opt, RxTimeout);
++        private static readonly Regex RxRefresh = new Regex(@"^\s*(\d+(?:\.\d+)?)\s*(?:[;,]\s*(?:url\s*=\s*)?['""]?\s*([^'"">]*))?", Opt, RxTimeout);
++        private static readonly Regex RxJsRedirect = new Regex(@"(?:window|document|top|self|parent)\.location(?:\.href)?\s*=(?!=)|(?<![\w.])location(?:\.href)?\s*=(?!=)|location\.(?:replace|assign)\s*\(", Opt, RxTimeout);
++
++        private const int MaxItems = 20;
++
++        public static HtmlScanResult Analyze(byte[] body, string contentTypeHeader, Uri pageUri, bool truncated)
++        {
++            var r = new HtmlScanResult { Length = body == null ? 0 : body.Length, Truncated = truncated };
++            if (body == null || body.Length == 0)
++            {
++                r.Note = "The page body is empty.";
++                return r;
++            }
++
++            try
++            {
++                string html = Decode(body, contentTypeHeader, r);
++                Scan(html, pageUri, r);
++            }
++            catch (RegexMatchTimeoutException)
++            {
++                r.Note = "The page is too complex to analyse safely, so only part of it was checked.";
++            }
++            return r;
++        }
++
++        // ---------------- giải mã ----------------
++
++        private static string Decode(byte[] body, string contentTypeHeader, HtmlScanResult r)
++        {
++            string charset = null;
++            if (!string.IsNullOrEmpty(contentTypeHeader))
++            {
++                Match m = RxCharsetMeta.Match(contentTypeHeader);
++                if (m.Success) charset = m.Groups[1].Value;
++            }
++            if (charset == null)
++            {
++                string head = Encoding.ASCII.GetString(body, 0, Math.Min(body.Length, 2048));
++                Match m = RxCharsetMeta.Match(head);
++                if (m.Success) charset = m.Groups[1].Value;
++            }
++
++            Encoding enc = new UTF8Encoding(false, false);
++            if (!string.IsNullOrEmpty(charset))
++            {
++                try { enc = Encoding.GetEncoding(charset); r.Charset = charset; }
++                catch (ArgumentException) { r.Charset = charset + " (unknown, read as UTF-8)"; }
++            }
++            return enc.GetString(body);
++        }
++
++        // ---------------- quét ----------------
++
++        private static void Scan(string html, Uri page, HtmlScanResult r)
++        {
++            // 1) script: lấy host script ngoài + dấu hiệu chuyển trang bằng JS, rồi bỏ ruột script
++            foreach (Match m in RxScript.Matches(html))
++            {
++                string src = Attr(m.Groups[1].Value, "src");
++                if (src != null)
++                {
++                    Uri abs = Resolve(page, src);
++                    if (abs != null && IsWeb(abs) && !DomainUtil.SameSite(abs.IdnHost, page.IdnHost)
++                        && !r.ExternalScriptHosts.Contains(abs.IdnHost) && r.ExternalScriptHosts.Count < 30)
++                        r.ExternalScriptHosts.Add(abs.IdnHost);
++                }
++                else if (!r.JsRedirectHint && RxJsRedirect.IsMatch(m.Groups[2].Value))
++                {
++                    r.JsRedirectHint = true;
++                }
++            }
++            string text = RxScript.Replace(html, " ");
++            text = RxStyle.Replace(text, " ");
++            text = RxComment.Replace(text, " ");
++
++            // 2) tiêu đề
++            Match t = RxTitle.Match(text);
++            if (t.Success)
++                r.Title = Clean(WebUtility.HtmlDecode(t.Groups[1].Value), 200);
++
++            // 3) form / input / iframe / meta / base theo thứ tự xuất hiện
++            HtmlForm current = null;
++            Uri baseUri = page;
++            foreach (Match m in RxTag.Matches(text))
++            {
++                bool closing = m.Groups[1].Value == "/";
++                string name = m.Groups[2].Value.ToLowerInvariant();
++                string attrs = m.Groups[3].Value;
++
++                if (name == "form")
++                {
++                    if (closing) { current = null; continue; }
++                    if (r.Forms.Count >= MaxItems) continue;
++                    current = MakeForm(attrs, baseUri, page);
++                    r.Forms.Add(current);
++                }
++                else if (closing)
++                {
++                    continue;
++                }
++                else if (name == "input")
++                {
++                    string type = (Attr(attrs, "type") ?? "").Trim().ToLowerInvariant();
++                    if (type == "password")
++                    {
++                        r.PasswordFields++;
++                        if (current != null) current.HasPassword = true;
++                    }
++                }
++                else if (name == "iframe" || name == "frame")
++                {
++                    if (r.Frames.Count >= MaxItems) continue;
++                    string src = Attr(attrs, "src");
++                    Uri abs = src == null ? null : Resolve(baseUri, src);
++                    if (abs == null || !IsWeb(abs)) continue;
++                    r.Frames.Add(new HtmlFrame
++                    {
++                        Src = Clean(abs.AbsoluteUri, 300),
++                        Hidden = IsHiddenFrame(attrs),
++                        External = !DomainUtil.SameSite(abs.IdnHost, page.IdnHost)
++                    });
++                }
++                else if (name == "base")
++                {
++                    string href = Attr(attrs, "href");
++                    Uri abs = href == null ? null : Resolve(page, href);
++                    if (abs != null && IsWeb(abs)) baseUri = abs;
++                }
++                else if (name == "meta" && r.MetaRefreshTarget == null)
++                {
++                    string equiv = Attr(attrs, "http-equiv");
++                    if (equiv != null && equiv.Trim().Equals("refresh", StringComparison.OrdinalIgnoreCase))
++                        ReadMetaRefresh(Attr(attrs, "content"), baseUri, page, r);
++                }
++            }
++
++            BuildWarnings(page, r);
++        }
++
++        private static HtmlForm MakeForm(string attrs, Uri baseUri, Uri page)
++        {
++            var f = new HtmlForm { Method = (Attr(attrs, "method") ?? "GET").Trim().ToUpperInvariant() };
++            string action = Attr(attrs, "action");
++
++            if (string.IsNullOrWhiteSpace(action))
++            {
++                f.Action = "(same page)";
++                f.Insecure = page.Scheme == Uri.UriSchemeHttp;
++                return f;
++            }
++
++            Uri abs = Resolve(baseUri, action.Trim());
++            if (abs == null || !IsWeb(abs))
++            {
++                f.Action = Clean(action.Trim(), 200);   // javascript:, mailto:, ...
++                return f;
++            }
++
++            f.Action = Clean(abs.AbsoluteUri, 300);
++            f.External = !DomainUtil.SameSite(abs.IdnHost, page.IdnHost);
++            f.Insecure = abs.Scheme == Uri.UriSchemeHttp;
++            return f;
++        }
++
++        private static void ReadMetaRefresh(string content, Uri baseUri, Uri page, HtmlScanResult r)
++        {
++            if (string.IsNullOrWhiteSpace(content)) return;
++            Match m = RxRefresh.Match(content);
++            if (!m.Success) return;
++
++            r.MetaRefreshDelay = m.Groups[1].Value;
++            string target = m.Groups[2].Success ? m.Groups[2].Value.Trim() : "";
++            if (target.Length == 0) { r.MetaRefreshTarget = "(reloads the same page)"; return; }
++
++            Uri abs = Resolve(baseUri, target);
++            if (abs == null || !IsWeb(abs)) { r.MetaRefreshTarget = Clean(target, 200); return; }
++            r.MetaRefreshTarget = Clean(abs.AbsoluteUri, 300);
++            r.MetaRefreshExternal = !DomainUtil.SameSite(abs.IdnHost, page.IdnHost);
++        }
++
++        private static void BuildWarnings(Uri page, HtmlScanResult r)
++        {
++            foreach (HtmlForm f in r.Forms.Where(x => x.HasPassword))
++            {
++                if (f.External)
++                    r.Warnings.Add("A form with a password field sends the data to a different site: " + f.Action);
++                else if (f.Insecure)
++                    r.Warnings.Add("A form with a password field sends the data over plain HTTP: " + f.Action);
++            }
++            if (r.PasswordFields > 0 && page.Scheme == Uri.UriSchemeHttp)
++                r.Warnings.Add("The page asks for a password but was loaded over plain HTTP.");
++            if (r.MetaRefreshExternal)
++                r.Warnings.Add("The page sends the visitor to another site by itself" +
++                               (r.MetaRefreshDelay != null ? " after " + r.MetaRefreshDelay + " second(s)" : "") +
++                               ": " + r.MetaRefreshTarget);
++            foreach (HtmlFrame fr in r.Frames.Where(x => x.Hidden && x.External))
++                r.Warnings.Add("A hidden frame loads content from another site: " + fr.Src);
++        }
++
++        // ---------------- tiện ích ----------------
++
++        // Lấy giá trị thuộc tính (không phân biệt hoa thường). null nếu không có.
++        internal static string Attr(string attrs, string name)
++        {
++            if (string.IsNullOrEmpty(attrs)) return null;
++            foreach (Match m in RxAttr.Matches(attrs))
++            {
++                if (!string.Equals(m.Groups[1].Value, name, StringComparison.OrdinalIgnoreCase)) continue;
++                for (int g = 2; g <= 4; g++)
++                    if (m.Groups[g].Success) return WebUtility.HtmlDecode(m.Groups[g].Value);
++            }
++            return null;
++        }
++
++        private static bool IsHiddenFrame(string attrs)
++        {
++            if (Regex.IsMatch(attrs, @"(^|\s)hidden(\s|=|$)", Opt, RxTimeout)) return true;
++
++            foreach (string dim in new[] { "width", "height" })
++            {
++                string v = Attr(attrs, dim);
++                int n;
++                if (v != null && int.TryParse(v.Trim().TrimEnd('p', 'x', 'P', 'X'), NumberStyles.Integer, CultureInfo.InvariantCulture, out n) && n <= 1)
++                    return true;
++            }
++
++            string style = (Attr(attrs, "style") ?? "").Replace(" ", "").ToLowerInvariant();
++            return style.Contains("display:none") || style.Contains("visibility:hidden")
++                   || style.Contains("width:0") || style.Contains("height:0");
++        }
++
++        private static Uri Resolve(Uri baseUri, string value)
++        {
++            if (string.IsNullOrWhiteSpace(value)) return null;
++            Uri abs;
++            return Uri.TryCreate(baseUri, value.Trim(), out abs) ? abs : null;
++        }
++
++        private static bool IsWeb(Uri u)
++        {
++            return u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps;
++        }
++
++        // Bỏ ký tự điều khiển và ký tự định dạng hai chiều (RTL override...) để văn bản của trang
++        // không thể đánh lừa mắt người đọc; gộp khoảng trắng và cắt độ dài.
++        internal static string Clean(string s, int max)
++        {
++            if (s == null) return null;
++            var sb = new StringBuilder(Math.Min(s.Length, max));
++            bool space = false;
++            foreach (char c in s)
++            {
++                UnicodeCategory cat = char.GetUnicodeCategory(c);
++                if (char.IsWhiteSpace(c) || cat == UnicodeCategory.LineSeparator || cat == UnicodeCategory.ParagraphSeparator)
++                {
++                    if (!space && sb.Length > 0) sb.Append(' ');
++                    space = true;
++                    continue;
++                }
++                if (cat == UnicodeCategory.Control || cat == UnicodeCategory.Format) continue;
++                space = false;
++                sb.Append(c);
++                if (sb.Length >= max) { sb.Append("..."); break; }
++            }
++            return sb.ToString().Trim();
++        }
++    }
++}
+diff --git a/Manager/Offline_check.cs b/Manager/Offline_check.cs
+index d669c83..aebe23f 100644
+--- a/Manager/Offline_check.cs
++++ b/Manager/Offline_check.cs
+@@ -37,7 +37,11 @@ namespace Project_check_URL.View
+                 "co.uk", "org.uk", "ac.uk", "gov.uk",
+                 "com.au", "net.au", "org.au",
+                 "co.jp", "com.br", "co.kr", "com.sg",
+-                "co.in", "co.nz", "co.za", "com.cn", "com.tw", "com.hk"
++                "co.in", "co.nz", "co.za", "com.cn", "com.tw", "com.hk",
++                "co.id", "or.id", "web.id", "com.my", "com.mx", "com.tr", "com.ar", "com.co", "com.pe",
++                "co.th", "in.th", "com.ph", "com.pk", "com.eg", "com.sa", "com.ua", "com.ng", "co.ke",
++                "org.in", "net.in", "gov.in", "org.cn", "net.cn", "gov.cn", "ac.jp", "or.jp", "ne.jp", "go.jp",
++                "ac.nz", "org.nz", "co.il", "me.uk", "ltd.uk", "net.uk", "org.au", "edu.au", "gov.au"
+             };
+ 
+         public static string GetRegistrableDomain(string[] labels)
+diff --git a/Manager/RedirectAnalysis.cs b/Manager/RedirectAnalysis.cs
+new file mode 100644
+index 0000000..336be67
+--- /dev/null
++++ b/Manager/RedirectAnalysis.cs
+@@ -0,0 +1,188 @@
++using System;
++using System.Collections.Generic;
++using System.Linq;
++using System.Text.RegularExpressions;
++using Project_check_URL.View;
++
++namespace Project_check_URL
++{
++    // Kết quả kiểm tra tĩnh (homograph / thương hiệu / IP) của một host nằm trong chuỗi redirect
++    internal class HostStaticCheck
++    {
++        public string Host { get; set; }
++        public List<CheckFinding> Findings { get; set; }
++        public string Level { get; set; }
++    }
++
++    // ------------------------------------------------------------------
++    // Đánh giá thẻ "Redirects" từ kết quả thăm dò HTTP.
++    // Trước đây thẻ này chỉ xét mã trạng thái cuối nên gần như luôn "Safe";
++    // nay xét cả chuỗi chuyển hướng: đổi site, hạ cấp HTTPS, nhiều bước, TLS cũ,
++    // header Refresh, và chạy lại kiểm tra tĩnh cho từng host đích.
++    // ------------------------------------------------------------------
++    internal class RedirectAnalysis
++    {
++        public string Level { get; private set; }
++        public string Finding { get; private set; }
++        public string Assessment { get; private set; }
++
++        public int Redirects { get; private set; }
++        public bool CrossSite { get; private set; }
++        public bool Downgrade { get; private set; }
++        public bool StartsOnShortener { get; private set; }
++        public string RefreshTarget { get; private set; }
++        public bool RefreshCrossSite { get; private set; }
++        public List<string> OutdatedTls { get; private set; }
++        public List<string> Sites { get; private set; }               // các site (tên miền đăng ký được) đã đi qua, theo thứ tự
++        public List<HostStaticCheck> HostChecks { get; private set; } // kiểm tra tĩnh cho host khác host ban đầu
++        public List<string> Reasons { get; private set; }
++
++        private static readonly Regex RxRefreshUrl =
++            new Regex(@"url\s*=\s*['""]?\s*([^'"";,\s]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
++
++        private static readonly string[] OutdatedProtocols = { "Ssl2", "Ssl3", "Tls", "Tls11" };
++
++        private RedirectAnalysis()
++        {
++            Level = "Safe";
++            OutdatedTls = new List<string>();
++            Sites = new List<string>();
++            HostChecks = new List<HostStaticCheck>();
++            Reasons = new List<string>();
++        }
++
++        private void Raise(string level, string reason)
++        {
++            if (level == "Danger" || (level == "Warning" && Level == "Safe")) Level = level;
++            if (!string.IsNullOrEmpty(reason)) Reasons.Add(reason);
++        }
++
++        public static RedirectAnalysis Analyze(HttpProbeResult p)
++        {
++            var a = new RedirectAnalysis();
++
++            // ---- chuỗi URL ----
++            var uris = new List<Uri>();
++            foreach (string u in p.RedirectChain)
++            {
++                Uri parsed;
++                if (Uri.TryCreate(u, UriKind.Absolute, out parsed)) uris.Add(parsed);
++            }
++            a.Redirects = Math.Max(0, p.RedirectChain.Count - 1);
++
++            foreach (Uri u in uris)
++            {
++                string site = DomainUtil.Registrable(u.IdnHost);
++                if (site != null && (a.Sites.Count == 0 || !string.Equals(a.Sites[a.Sites.Count - 1], site, StringComparison.OrdinalIgnoreCase)))
++                    a.Sites.Add(site);
++            }
++            a.CrossSite = a.Sites.Count > 1;
++
++            for (int i = 1; i < uris.Count; i++)
++                if (uris[i - 1].Scheme == Uri.UriSchemeHttps && uris[i].Scheme == Uri.UriSchemeHttp)
++                    a.Downgrade = true;
++
++            a.StartsOnShortener = uris.Count > 0 && DomainUtil.IsShortener(uris[0].IdnHost);
++
++            // ---- header Refresh của bước cuối (một dạng chuyển hướng mà probe KHÔNG đi theo) ----
++            string refresh;
++            if (p.Headers.TryGetValue("Refresh", out refresh) && uris.Count > 0)
++            {
++                try
++                {
++                    Match m = RxRefreshUrl.Match(refresh);
++                    if (m.Success)
++                    {
++                        Uri target;
++                        Uri last = uris[uris.Count - 1];
++                        if (Uri.TryCreate(last, m.Groups[1].Value, out target) &&
++                            (target.Scheme == Uri.UriSchemeHttp || target.Scheme == Uri.UriSchemeHttps))
++                        {
++                            a.RefreshTarget = target.AbsoluteUri;
++                            a.RefreshCrossSite = !DomainUtil.SameSite(target.IdnHost, last.IdnHost);
++                        }
++                    }
++                }
++                catch (RegexMatchTimeoutException) { }
++            }
++
++            // ---- TLS cũ ----
++            foreach (HttpHop hop in p.Hops)
++                if (hop.TlsProtocol != null && OutdatedProtocols.Contains(hop.TlsProtocol) && !a.OutdatedTls.Contains(hop.TlsProtocol))
++                    a.OutdatedTls.Add(hop.TlsProtocol);
++
++            // ---- kiểm tra tĩnh các host đích (khác host ban đầu) ----
++            if (uris.Count > 1)
++            {
++                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { uris[0].IdnHost };
++                for (int i = 1; i < uris.Count; i++)
++                {
++                    if (!seen.Add(uris[i].IdnHost)) continue;
++
++                    List<CheckFinding> findings;
++                    try { findings = Offline_check.CheckHomograph(uris[i]); }
++                    catch (Exception) { continue; }
++
++                    // Bỏ cảnh báo "chưa nạp confusables.txt": nó không nói gì về host này
++                    findings = findings.Where(f => f.Finding == null || !f.Finding.StartsWith("confusables.txt not loaded", StringComparison.Ordinal)).ToList();
++
++                    string level = findings.Any(f => f.Level == "Danger") ? "Danger" :
++                                   findings.Any(f => f.Level == "Warning") ? "Warning" : "Safe";
++                    a.HostChecks.Add(new HostStaticCheck { Host = uris[i].IdnHost, Findings = findings, Level = level });
++                }
++            }
++
++            // ---- tổng hợp mức độ ----
++            if (p.Error != null)
++            {
++                a.Raise("Warning", "The server could not be checked (" + p.Error + ").");
++            }
++            else
++            {
++                if (p.StatusCode >= 300 && p.StatusCode < 400)
++                    a.Raise("Warning", "The server answered with a redirect (" + p.StatusCode + ") but gave no usable destination.");
++                else if (p.StatusCode >= 400)
++                    a.Raise("Warning", "The server answered with an error (" + p.StatusCode + "). The page may have been removed, or it may block automated checks.");
++            }
++
++            if (a.CrossSite)
++                a.Raise("Warning", "The link redirects to a different site (" + string.Join(" -> ", a.Sites) + ").");
++            if (a.Downgrade)
++                a.Raise("Warning", "A redirect moves from HTTPS to plain HTTP, so the connection is no longer protected.");
++            if (a.Redirects >= 3)
++                a.Raise("Warning", "The link passes through " + a.Redirects + " redirects before the final page.");
++            if (a.RefreshCrossSite)
++                a.Raise("Warning", "The final page sends the visitor to another site through a Refresh header (" + a.RefreshTarget + ").");
++            if (a.OutdatedTls.Count > 0)
++                a.Raise("Warning", "A server uses an outdated TLS version (" + string.Join(", ", a.OutdatedTls) + ").");
++
++            foreach (HostStaticCheck h in a.HostChecks.Where(x => x.Level != "Safe"))
++            {
++                CheckFinding worst = h.Findings.FirstOrDefault(f => f.Level == h.Level);
++                a.Raise(h.Level, "The redirect target " + h.Host + " is suspicious" +
++                                 (worst != null ? " (" + worst.Criterion + ": " + worst.Finding + ")" : "") + ".");
++            }
++
++            // ---- chữ hiện ở Home và hộp Assessment ----
++            if (p.Error != null)
++            {
++                a.Finding = p.Error;
++            }
++            else
++            {
++                a.Finding = p.StatusCode.ToString();
++                if (a.Redirects > 0) a.Finding += "  ·  " + a.Redirects + (a.Redirects == 1 ? " redirect" : " redirects");
++                if (a.CrossSite) a.Finding += "  ·  other site";
++            }
++
++            if (a.Reasons.Count > 0)
++            {
++                string joined = string.Join(" ", a.Reasons);
++                a.Assessment = a.Level == "Danger"
++                    ? "High risk. " + joined + " Do not open this link or enter any information."
++                    : joined + " Check that the final address is what you expect before you continue.";
++            }
++            return a;
++        }
++    }
++}
+diff --git a/Manager/VT_response.cs b/Manager/VT_response.cs
+index 44d5df4..0f1a61c 100644
+--- a/Manager/VT_response.cs
++++ b/Manager/VT_response.cs
+@@ -31,6 +31,8 @@ namespace Project_check_URL
+         public VtReport() { Engines = new List<EngineVerdict>(); }
+ 
+         public bool IsCompleted { get { return Status == "completed"; } }
++        // Báo cáo có sẵn trên VirusTotal (không phải quét mới); AnalysisId do API_request đặt tiền tố "existing-"
++        public bool IsExisting { get { return AnalysisId != null && AnalysisId.StartsWith("existing-", StringComparison.Ordinal); } }
+         public int Responding { get { return Malicious + Suspicious + Harmless; } }
+         public int TotalEngines { get { return Responding + Undetected + Timeout; } }
+         public string VtPageUrl
+@@ -232,4 +234,169 @@ namespace Project_check_URL
+             return meaning;
+         }
+     }
+-}
+\ No newline at end of file
++
++    // ------------------------------------------------------------------
++    // Thông tin lấy từ đối tượng URL của VirusTotal (GET /urls/{id}):
++    // điểm cộng đồng, bình chọn, phân loại, lần đầu thấy, số lần gửi...
++    // Mọi trường đều có thể thiếu nên đọc phòng thủ.
++    // ------------------------------------------------------------------
++    internal class VtUrlInfo
++    {
++        public int? Reputation { get; set; }
++        public bool HasVotes { get; set; }
++        public int VotesHarmless { get; set; }
++        public int VotesMalicious { get; set; }
++        public List<KeyValuePair<string, string>> Categories { get; private set; }
++        public List<string> Tags { get; private set; }
++        public List<string> ThreatNames { get; private set; }
++        public DateTime? FirstSeenUtc { get; set; }
++        public DateTime? LastSubmissionUtc { get; set; }
++        public DateTime? LastAnalysisUtc { get; set; }
++        public int TimesSubmitted { get; set; }
++        public string Title { get; set; }
++        public string LastFinalUrl { get; set; }
++        public int? LastHttpCode { get; set; }
++
++        public VtUrlInfo()
++        {
++            Categories = new List<KeyValuePair<string, string>>();
++            Tags = new List<string>();
++            ThreatNames = new List<string>();
++        }
++
++        private static readonly string[] RiskyWords =
++            { "phish", "malware", "malicious", "suspicious", "spam", "scam", "fraud", "newly registered", "newly observed" };
++
++        private static readonly DateTime Epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
++
++        public static VtUrlInfo Parse(string json)
++        {
++            var ser = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
++            var root = ser.Deserialize<Dictionary<string, object>>(json);
++            var attrs = Obj(Obj(root, "data"), "attributes");
++            var info = new VtUrlInfo();
++            if (attrs == null) return info;
++
++            long n;
++            if (Long(attrs, "reputation", out n)) info.Reputation = (int)n;
++
++            var votes = Obj(attrs, "total_votes");
++            if (votes != null)
++            {
++                info.HasVotes = true;
++                if (Long(votes, "harmless", out n)) info.VotesHarmless = (int)n;
++                if (Long(votes, "malicious", out n)) info.VotesMalicious = (int)n;
++            }
++
++            var cats = Obj(attrs, "categories");
++            if (cats != null)
++                foreach (var kv in cats)
++                    if (kv.Value != null) info.Categories.Add(new KeyValuePair<string, string>(kv.Key, kv.Value.ToString()));
++
++            info.Tags.AddRange(Strings(attrs, "tags"));
++            info.ThreatNames.AddRange(Strings(attrs, "threat_names"));
++
++            info.FirstSeenUtc = Time(attrs, "first_submission_date");
++            info.LastSubmissionUtc = Time(attrs, "last_submission_date");
++            info.LastAnalysisUtc = Time(attrs, "last_analysis_date");
++            if (Long(attrs, "times_submitted", out n)) info.TimesSubmitted = (int)n;
++
++            info.Title = HtmlScan.Clean(Str(attrs, "title"), 200);
++            info.LastFinalUrl = HtmlScan.Clean(Str(attrs, "last_final_url"), 300);
++            if (Long(attrs, "last_http_response_code", out n)) info.LastHttpCode = (int)n;
++            return info;
++        }
++
++        // Những điểm đáng ngại rút ra từ dữ liệu cộng đồng / phân loại. Rỗng nếu không có gì.
++        public List<string> RiskReasons()
++        {
++            var reasons = new List<string>();
++
++            if (Reputation.HasValue && Reputation.Value < 0)
++                reasons.Add("The VirusTotal community reputation score is negative (" + Reputation.Value + ").");
++
++            if (HasVotes && VotesMalicious > VotesHarmless)
++                reasons.Add("More community votes say malicious (" + VotesMalicious + ") than harmless (" + VotesHarmless + ").");
++
++            List<string> risky = Categories
++                .Where(c => RiskyWords.Any(w => (c.Value ?? "").ToLowerInvariant().Contains(w)))
++                .Select(c => c.Key + ": " + HtmlScan.Clean(c.Value, 60))
++                .Take(3).ToList();
++            if (risky.Count > 0)
++                reasons.Add("Categorisation services label it as " + string.Join("; ", risky) + ".");
++
++            if (ThreatNames.Count > 0)
++                reasons.Add("VirusTotal lists threat names: " + string.Join(", ", ThreatNames.Take(5).Select(x => HtmlScan.Clean(x, 60))) + ".");
++
++            return reasons;
++        }
++
++        private static Dictionary<string, object> Obj(Dictionary<string, object> d, string k)
++        {
++            object v;
++            return d != null && d.TryGetValue(k, out v) ? v as Dictionary<string, object> : null;
++        }
++        private static string Str(Dictionary<string, object> d, string k)
++        {
++            object v;
++            return d != null && d.TryGetValue(k, out v) && v != null ? v.ToString() : null;
++        }
++        private static bool Long(Dictionary<string, object> d, string k, out long n)
++        {
++            return long.TryParse(Str(d, k), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out n);
++        }
++        private static DateTime? Time(Dictionary<string, object> d, string k)
++        {
++            long unix;
++            return Long(d, k, out unix) && unix > 0 ? (DateTime?)Epoch.AddSeconds(unix) : null;
++        }
++        private static IEnumerable<string> Strings(Dictionary<string, object> d, string k)
++        {
++            object v;
++            var list = new List<string>();
++            if (d == null || !d.TryGetValue(k, out v) || !(v is System.Collections.IEnumerable) || v is string) return list;
++            foreach (object item in (System.Collections.IEnumerable)v)
++                if (item != null) list.Add(HtmlScan.Clean(item.ToString(), 80));
++            return list;
++        }
++    }
++
++    // Kết luận của thẻ "Reputation" (gom một chỗ để test được, HomeView chỉ gán vào CheckItem)
++    internal class ReputationEval
++    {
++        public string Finding { get; set; }
++        public string Level { get; set; }
++        public string Assessment { get; set; }
++
++        public static ReputationEval Evaluate(VtReport r, VtVerdict v, VtUrlInfo u)
++        {
++            var e = new ReputationEval
++            {
++                // cách tính cũ giữ nguyên: dùng khi chưa có dữ liệu cộng đồng
++                Finding = r.Harmless + " harmless, " + r.Undetected + " undetected",
++                Level = (r.Malicious + r.Suspicious) > 0 || v.Level == "Unknown" ? "Warning" : "Safe",
++                Assessment = v.Level == "Unknown" ? v.Assessment : null
++            };
++
++            if (u == null) return e;
++
++            // "Reputation" trước đây chỉ đếm engine; nay hiện điểm và bình chọn thật của cộng đồng
++            if (u.Reputation.HasValue || u.HasVotes)
++            {
++                string score = u.Reputation.HasValue ? "Score " + u.Reputation.Value : "No score";
++                e.Finding = u.HasVotes
++                    ? score + "  ·  votes " + u.VotesHarmless + " harmless / " + u.VotesMalicious + " malicious"
++                    : score;
++            }
++
++            List<string> reasons = u.RiskReasons();
++            if (reasons.Count > 0)
++            {
++                e.Level = "Warning";
++                string extra = string.Join(" ", reasons);
++                e.Assessment = string.IsNullOrEmpty(e.Assessment) ? extra : e.Assessment + " " + extra;
++            }
++            return e;
++        }
++    }
++}
+diff --git a/Project_check_URL.csproj b/Project_check_URL.csproj
+index f88d0cc..c1c0b2e 100644
+--- a/Project_check_URL.csproj
++++ b/Project_check_URL.csproj
+@@ -71,6 +71,9 @@
+     <Compile Include="ManifestVerifier.cs" />
+     <Compile Include="ReportExporter.cs" />
+     <Compile Include="ExportCommand.cs" />
++    <Compile Include="Manager\DomainInfo.cs" />
++    <Compile Include="Manager\HtmlScan.cs" />
++    <Compile Include="Manager\RedirectAnalysis.cs" />
+     <Compile Include="View\Animation.cs" />
+     <Compile Include="UserRepository.cs" />
+     <Compile Include="Manager\Offline_check.cs" />
+diff --git a/ReportExporter.cs b/ReportExporter.cs
+index cd32bc1..7bb793b 100644
+--- a/ReportExporter.cs
++++ b/ReportExporter.cs
+@@ -29,7 +29,7 @@ namespace Project_check_URL
+         {
+             "Offline analysis of the link and its domain name",
+             "How the security engines on VirusTotal rate this URL",
+-            "What the web server answers: status, redirects and content type"
++            "What the web server answers: status, redirects, content type and the start of the page"
+         };
+         private static readonly string[] SectionEmptyText =
+         {
+diff --git a/View/DetailView.xaml.cs b/View/DetailView.xaml.cs
+index 40c413c..d0f67ee 100644
+--- a/View/DetailView.xaml.cs
++++ b/View/DetailView.xaml.cs
+@@ -214,7 +214,7 @@ namespace Project_check_URL.View
+                     "How the security engines on VirusTotal rate this URL",
+                     offlineNote),
+                 new DetailSection("3", "HTML ANALYSIS",
+-                    "What the web server answers: status, redirects and content type",
++                    "What the web server answers: status, redirects, content type and the start of the page",
+                     offlineNote)
+             };
+ 
+@@ -259,7 +259,7 @@ namespace Project_check_URL.View
+                 case "Protocol":
+                     return "Checks whether the link uses HTTPS. HTTPS encrypts the traffic between you and the site; plain HTTP can be read or changed on the way.";
+                 case "Domain":
+-                    return "Reads the host name of the link. The domain checks below (punycode, mixed scripts, brand look-alikes) are all run on this name.";
++                    return "Reads the host name of the link. The domain checks below (punycode, mixed scripts, brand look-alikes) are all run on this name. In online mode it also looks up when the domain was registered (RDAP); a domain registered in the last 30 days raises a warning.";
+                 case "Punycode (IDN)":
+                     return "Detects internationalized domain names (labels starting with xn--). Attackers register such names to build addresses that look like well-known sites.";
+                 case "Mixed writing systems":
+@@ -267,13 +267,13 @@ namespace Project_check_URL.View
+                 case "Brand impersonation":
+                     return "Compares the domain with a list of well-known brands, using Unicode look-alike characters and one-character typos (typosquatting).";
+                 case "Reputation":
+-                    return "Summarises how the VirusTotal engines classified this URL as harmless or undetected. A clean reputation lowers risk but does not prove safety.";
++                    return "Shows the VirusTotal community reputation score and votes, how third-party services categorise this URL, and when VirusTotal first saw it. A clean reputation lowers risk but does not prove safety. The engine counts are in Blacklist.";
+                 case "Blacklist":
+-                    return "Counts the VirusTotal engines that flagged this URL as malicious or suspicious. Any malicious verdict is treated as a strong warning sign.";
++                    return "Counts the VirusTotal engines that flagged this URL as malicious or suspicious. Any malicious verdict is treated as a strong warning sign. A VirusTotal report less than 24 hours old is reused instead of starting a new scan.";
+                 case "Redirects":
+-                    return "Contacts the server and reports the HTTP response and any redirect hops (up to 5) without downloading the page content. Each step lists the resolved IP and, for https, the TLS protocol and certificate.";
++                    return "Contacts the server and follows redirects (up to 5). It raises a warning when the link ends on a different site, drops from HTTPS to HTTP, passes through many redirects, or a server uses an outdated TLS version, and it runs the look-alike checks again on every redirect target. Each step lists the resolved IP and, for https, the TLS protocol and certificate.";
+                 case "Content-Type":
+-                    return "Reads the Content-Type header, which tells what kind of file the link returns. A normal web page is text/html; a link that returns an installer, an executable or a forced download is a common way to deliver malware.";
++                    return "Reads the Content-Type header, which tells what kind of file the link returns, and the file name offered for download. For an HTML page it also reads the first part as plain text (forms, password fields, hidden frames, automatic redirects). Nothing is run. A link that returns an installer, an executable or a forced download is a common way to deliver malware.";
+                 default:
+                     return "Additional check performed on this link.";
+             }

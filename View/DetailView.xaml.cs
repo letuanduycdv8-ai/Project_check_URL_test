@@ -214,7 +214,7 @@ namespace Project_check_URL.View
                     "How the security engines on VirusTotal rate this URL",
                     offlineNote),
                 new DetailSection("3", "HTML ANALYSIS",
-                    "What the web server answers: status, redirects and content type",
+                    "What the web server answers: status, redirects, content type and the start of the page",
                     offlineNote)
             };
 
@@ -259,7 +259,7 @@ namespace Project_check_URL.View
                 case "Protocol":
                     return "Checks whether the link uses HTTPS. HTTPS encrypts the traffic between you and the site; plain HTTP can be read or changed on the way.";
                 case "Domain":
-                    return "Reads the host name of the link. The domain checks below (punycode, mixed scripts, brand look-alikes) are all run on this name.";
+                    return "Reads the host name of the link. The domain checks below (punycode, mixed scripts, brand look-alikes) are all run on this name. In online mode it also looks up when the domain was registered (RDAP); a domain registered in the last 30 days raises a warning.";
                 case "Punycode (IDN)":
                     return "Detects internationalized domain names (labels starting with xn--). Attackers register such names to build addresses that look like well-known sites.";
                 case "Mixed writing systems":
@@ -267,13 +267,13 @@ namespace Project_check_URL.View
                 case "Brand impersonation":
                     return "Compares the domain with a list of well-known brands, using Unicode look-alike characters and one-character typos (typosquatting).";
                 case "Reputation":
-                    return "Summarises how the VirusTotal engines classified this URL as harmless or undetected. A clean reputation lowers risk but does not prove safety.";
+                    return "Shows the VirusTotal community reputation score and votes, how third-party services categorise this URL, and when VirusTotal first saw it. A clean reputation lowers risk but does not prove safety. The engine counts are in Blacklist.";
                 case "Blacklist":
-                    return "Counts the VirusTotal engines that flagged this URL as malicious or suspicious. Any malicious verdict is treated as a strong warning sign.";
+                    return "Counts the VirusTotal engines that flagged this URL as malicious or suspicious. Any malicious verdict is treated as a strong warning sign. A VirusTotal report less than 24 hours old is reused instead of starting a new scan.";
                 case "Redirects":
-                    return "Contacts the server and reports the HTTP response and any redirect hops (up to 5) without downloading the page content. Each step lists the resolved IP and, for https, the TLS protocol and certificate.";
+                    return "Contacts the server and follows redirects (up to 5). It raises a warning when the link ends on a different site, drops from HTTPS to HTTP, passes through many redirects, or a server uses an outdated TLS version, and it runs the look-alike checks again on every redirect target. Each step lists the resolved IP and, for https, the TLS protocol and certificate.";
                 case "Content-Type":
-                    return "Reads the Content-Type header, which tells what kind of file the link returns. A normal web page is text/html; a link that returns an installer, an executable or a forced download is a common way to deliver malware.";
+                    return "Reads the Content-Type header, which tells what kind of file the link returns, and the file name offered for download. For an HTML page it also reads the first part as plain text (forms, password fields, hidden frames, automatic redirects). Nothing is run. A link that returns an installer, an executable or a forced download is a common way to deliver malware.";
                 default:
                     return "Additional check performed on this link.";
             }

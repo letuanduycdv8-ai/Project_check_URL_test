@@ -29,7 +29,7 @@ namespace Project_check_URL
         {
             "Offline analysis of the link and its domain name",
             "How the security engines on VirusTotal rate this URL",
-            "What the web server answers: status, redirects and content type"
+            "What the web server answers: status, redirects, content type and the start of the page"
         };
         private static readonly string[] SectionEmptyText =
         {

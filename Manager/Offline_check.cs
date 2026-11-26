@@ -37,7 +37,11 @@ namespace Project_check_URL.View
                 "co.uk", "org.uk", "ac.uk", "gov.uk",
                 "com.au", "net.au", "org.au",
                 "co.jp", "com.br", "co.kr", "com.sg",
-                "co.in", "co.nz", "co.za", "com.cn", "com.tw", "com.hk"
+                "co.in", "co.nz", "co.za", "com.cn", "com.tw", "com.hk",
+                "co.id", "or.id", "web.id", "com.my", "com.mx", "com.tr", "com.ar", "com.co", "com.pe",
+                "co.th", "in.th", "com.ph", "com.pk", "com.eg", "com.sa", "com.ua", "com.ng", "co.ke",
+                "org.in", "net.in", "gov.in", "org.cn", "net.cn", "gov.cn", "ac.jp", "or.jp", "ne.jp", "go.jp",
+                "ac.nz", "org.nz", "co.il", "me.uk", "ltd.uk", "net.uk", "org.au", "edu.au", "gov.au"
             };
 
         public static string GetRegistrableDomain(string[] labels)

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 
@@ -20,6 +21,8 @@ namespace Project_check_URL
         public DateTime? ScanDate { get; set; }          // giờ UTC VirusTotal hoàn tất phân tích
         public string ScannedUrl { get; set; }           // URL mà VirusTotal ghi nhận
         public string UrlId { get; set; }                // dùng để mở trang kết quả trên VirusTotal
+        public string UrlObjectJson { get; set; }        // JSON của GET /urls/{id} (điểm cộng đồng, phân loại...), null nếu không lấy được
+        public bool FromExistingReport { get; set; }     // true: dùng báo cáo có sẵn, không quét mới
         public List<EngineResult> Engines { get; private set; }
 
         public ScanResult()
@@ -90,13 +93,27 @@ namespace Project_check_URL
             _apiKey = apiKey;
         }
 
-        // Gửi URL, chờ quét xong, trả về kết quả.
+        // Báo cáo có sẵn trên VirusTotal chỉ được dùng lại nếu mới hơn mức này
+        private static readonly TimeSpan MaxExistingReportAge = TimeSpan.FromHours(24);
+
+        // Lấy kết quả cho URL. Đường nhanh: nếu VirusTotal đã có báo cáo trong 24 giờ gần đây thì dùng luôn
+        // (1 request, không phải đợi quét, đỡ quota). Nếu không thì gửi quét mới như trước.
         // Mặc định poll 15 giây/lần để không vượt quota bản free (4 request/phút).
         public async Task<ScanResult> ScanUrlAsync(string url, int maxAttempts = 8, int delayMs = 15000)
         {
             if (string.IsNullOrWhiteSpace(url))
                 throw new ArgumentException("URL không được để trống.", "url");
 
+            // 1) Có báo cáo mới sẵn chưa? Lỗi ở bước này không quan trọng, cứ quét mới.
+            string existingJson = null;
+            try { existingJson = await GetUrlObjectJsonAsync(UrlIdFromText(url)).ConfigureAwait(false); }
+            catch (Exception) { existingJson = null; }
+
+            ScanResult existing = TryBuildFromUrlObject(url, existingJson, DateTime.UtcNow);
+            if (existing != null)
+                return existing;
+
+            // 2) Quét mới
             string analysisId = await SubmitUrlAsync(url).ConfigureAwait(false);
 
             for (int i = 0; i < maxAttempts; i++)
@@ -105,12 +122,89 @@ namespace Project_check_URL
 
                 ScanResult result = await GetAnalysisAsync(analysisId).ConfigureAwait(false);
                 if (result.IsCompleted)
+                {
+                    // 3) Lấy thêm điểm cộng đồng, phân loại... (không bắt buộc: lỗi thì bỏ qua)
+                    try
+                    {
+                        string id = string.IsNullOrEmpty(result.UrlId) ? UrlIdFromText(url) : result.UrlId;
+                        result.UrlObjectJson = await GetUrlObjectJsonAsync(id).ConfigureAwait(false);
+                    }
+                    catch (Exception) { result.UrlObjectJson = null; }
                     return result;
+                }
             }
 
             throw new ScanTimeoutException(
                 "VirusTotal chưa quét xong (analysis ID: " + analysisId + "), hãy thử lại sau.",
                 analysisId);
+        }
+
+        // ID URL theo VirusTotal: base64 an toàn cho URL (+ -> -, / -> _), bỏ dấu "="
+        internal static string UrlIdFromText(string url)
+        {
+            return Convert.ToBase64String(Encoding.UTF8.GetBytes(url))
+                .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        }
+
+        // GET /urls/{id}: null nếu VirusTotal chưa từng thấy URL này (404)
+        private async Task<string> GetUrlObjectJsonAsync(string urlId)
+        {
+            using (var request = new HttpRequestMessage(HttpMethod.Get, BaseUrl + "/urls/" + urlId))
+            {
+                request.Headers.Add("x-apikey", _apiKey);
+                return await SendAsync(request, true).ConfigureAwait(false);
+            }
+        }
+
+        // Dựng kết quả từ đối tượng URL có sẵn. Trả null nếu thiếu dữ liệu hoặc báo cáo đã cũ
+        // (khi đó phải quét mới). Dựng lại JSON dạng /analyses để dùng chung VtReport.Parse.
+        internal static ScanResult TryBuildFromUrlObject(string url, string urlJson, DateTime nowUtc)
+        {
+            if (string.IsNullOrWhiteSpace(urlJson)) return null;
+
+            try
+            {
+                Dictionary<string, object> root = Parse(urlJson);
+                Dictionary<string, object> data = GetObject(root, "data");
+                Dictionary<string, object> attrs = GetObject(data, "attributes");
+                if (attrs == null) return null;
+
+                Dictionary<string, object> stats = GetObject(attrs, "last_analysis_stats");
+                Dictionary<string, object> results = GetObject(attrs, "last_analysis_results");
+                object date;
+                if (stats == null || stats.Count == 0 || results == null || results.Count == 0 ||
+                    !attrs.TryGetValue("last_analysis_date", out date) || date == null)
+                    return null;
+
+                long unix = Convert.ToInt64(date);
+                DateTime analysed = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(unix);
+                if (analysed > nowUtc.AddMinutes(5) || nowUtc - analysed > MaxExistingReportAge)
+                    return null;
+
+                string urlId = GetString(data, "id") ?? UrlIdFromText(url);
+                var synthetic = new Dictionary<string, object>
+                {
+                    { "data", new Dictionary<string, object> { { "attributes", new Dictionary<string, object> {
+                        { "status", "completed" }, { "date", unix }, { "stats", stats }, { "results", results } } } } },
+                    { "meta", new Dictionary<string, object> { { "url_info", new Dictionary<string, object> {
+                        { "id", urlId }, { "url", GetString(attrs, "url") ?? url } } } } }
+                };
+
+                string json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Serialize(synthetic);
+                string analysisId = "existing-" + urlId;
+
+                ScanResult r = ParseSummary(analysisId, json);
+                if (!r.IsCompleted) return null;
+
+                VT_ScanStore.Save(analysisId, json);
+                r.UrlObjectJson = urlJson;
+                r.FromExistingReport = true;
+                return r;
+            }
+            catch (Exception)
+            {
+                return null;     // dữ liệu lạ: quét mới cho chắc
+            }
         }
 
         // Bước 1: gửi URL, nhận analysis ID
@@ -278,11 +372,15 @@ namespace Project_check_URL
         // ---------- HTTP ----------
 
         // Gửi request và xử lý lỗi HTTP
-        private static async Task<string> SendAsync(HttpRequestMessage request)
+        // nullOn404 = true: 404 (chưa có dữ liệu) trả về null thay vì ném lỗi
+        private static async Task<string> SendAsync(HttpRequestMessage request, bool nullOn404 = false)
         {
             using (HttpResponseMessage response = await ClientMng.Client.SendAsync(request).ConfigureAwait(false))
             {
                 string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+
+                if (nullOn404 && response.StatusCode == HttpStatusCode.NotFound)
+                    return null;
 
                 if (response.IsSuccessStatusCode)
                     return body;

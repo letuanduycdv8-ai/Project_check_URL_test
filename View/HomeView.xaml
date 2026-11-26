@@ -883,7 +883,7 @@
 
                                 </StackPanel>
 
-                                <!-- RISK SCORE -->
+                                <!-- ASSESSMENT BY STEP -->
 
                                 <Border Grid.Column="1"
                                         Background="#0B2033"
@@ -891,28 +891,44 @@
                                         BorderThickness="1"
                                         CornerRadius="12"
                                         Padding="18,12"
-                                        MinWidth="115">
+                                        MinWidth="270">
 
-                                    <StackPanel VerticalAlignment="Center"
-                                                HorizontalAlignment="Center">
+                                    <StackPanel VerticalAlignment="Center">
 
-                                        <TextBlock Text="RISK SCORE"
+                                        <TextBlock Text="RESULT BY STEP"
                                                    Foreground="#82A8C0"
                                                    FontSize="10"
-                                                   FontWeight="Bold"
-                                                   HorizontalAlignment="Center"/>
+                                                   FontWeight="Bold"/>
 
-                                        <TextBlock x:Name="ScoreText"
-                                                   FontSize="32"
-                                                   FontWeight="Bold"
-                                                   Foreground="#5FD99B"
-                                                   HorizontalAlignment="Center"
-                                                   Margin="0,4,0,0"/>
+                                        <Grid Margin="0,8,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
 
-                                        <TextBlock Text="OUT OF 100"
-                                                   Foreground="#668BA4"
-                                                   FontSize="9"
-                                                   HorizontalAlignment="Center"/>
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Offline"
+                                                       Foreground="#A9C2D5" FontSize="12" Margin="0,0,16,6"/>
+                                            <TextBlock x:Name="StepOfflineText" Grid.Row="0" Grid.Column="1"
+                                                       FontSize="12" FontWeight="Bold" Foreground="#668BA4"
+                                                       HorizontalAlignment="Right" Text="-"/>       
+
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Online"
+                                                       Foreground="#A9C2D5" FontSize="12" Margin="0,0,16,6"/>
+                                            <TextBlock x:Name="StepOnlineText" Grid.Row="1" Grid.Column="1"
+                                                       FontSize="12" FontWeight="Bold" Foreground="#668BA4"
+                                                       HorizontalAlignment="Right" Text="-"/>           
+
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Text="VirusTotal"
+                                                       Foreground="#A9C2D5" FontSize="12" Margin="0,0,16,0"/>
+                                            <TextBlock x:Name="StepVtText" Grid.Row="2" Grid.Column="1"
+                                                       FontSize="12" FontWeight="Bold" Foreground="#668BA4"
+                                                       HorizontalAlignment="Right" Text="-"/>       
+                                        </Grid>
 
                                     </StackPanel>
                                 </Border>

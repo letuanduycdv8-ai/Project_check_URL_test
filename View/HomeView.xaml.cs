@@ -477,19 +477,78 @@ namespace Project_check_URL.View
             e.Handled = true;
         }
 
+        // Mỗi bước gồm các tiêu chí (Criterion) của nó
+        private static readonly string[][] StepCriteria =
+{
+    new[] { "Protocol", "Domain", "Punycode (IDN)", "Mixed writing systems", "Brand impersonation", "IP address" }, // Offline
+    new[] { "Redirects", "Content-Type" },                                                               // Online (HTTP)
+    new[] { "Reputation", "Blacklist" }                                                                  // VirusTotal
+};
+
+        private static Brush Hex(string hex)
+        {
+            return (Brush)new BrushConverter().ConvertFromString(hex);
+        }
+
         private void UpdateVerdict(List<CheckItem> items)
         {
-            if (items.Any(i => i.Level == "Danger"))
+            TextBlock[] labels = { StepOfflineText, StepOnlineText, StepVtText };
+            bool anyDanger = items.Any(i => i.Level == "Danger");
+            int warnSteps = 0;
+            bool pending = false;
+
+            for (int s = 0; s < StepCriteria.Length; s++)
+            {
+                List<CheckItem> step = items.Where(i => StepCriteria[s].Contains(i.Criterion)).ToList();
+
+                if (step.Count == 0)                                  // chế độ offline: không chạy bước này
+                {
+                    labels[s].Text = "Not run";
+                    labels[s].Foreground = Hex("#668BA4");
+                    continue;
+                }
+
+                if (step.Any(i => i.Finding == "Scanning..."))
+                {
+                    pending = true;
+                    labels[s].Text = "Scanning...";
+                    labels[s].Foreground = Hex("#82A8C0");
+                    continue;
+                }
+
+                int warn = step.Count(i => i.Level == "Warning");
+                bool stepWarn = warn * 2 >= step.Count;               // warning >= 50% số tiêu chí
+                if (stepWarn) warnSteps++;
+
+                string status = step.Any(i => i.Level == "Danger") ? "Danger"
+                              : stepWarn ? "Warning" : "Safe";
+
+                labels[s].Text = status + "  (" + warn + "/" + step.Count + " warning)";
+                labels[s].Foreground = status == "Danger" ? Hex("#FF6B7A")
+                                     : status == "Warning" ? Hex("#F2C14E")
+                                     : Hex("#5FD99B");
+            }
+
+            if (anyDanger || warnSteps >= 2)
             {
                 VerdictText.Text = "DANGEROUS";
-                VerdictText.Foreground = Brushes.Red;
+                VerdictText.Foreground = Hex("#FF6B7A");
+            }
+            else if (pending)
+            {
+                VerdictText.Text = "CHECKING...";
+                VerdictText.Foreground = Hex("#82A8C0");
+            }
+            else if (warnSteps == 1)
+            {
+                VerdictText.Text = "WARNING";
+                VerdictText.Foreground = Hex("#F2C14E");
             }
             else
             {
-                VerdictText.Text = "SAMPLE RESULT";
-                VerdictText.Foreground = Brushes.DarkOrange;
+                VerdictText.Text = "SAFE";
+                VerdictText.Foreground = Hex("#5FD99B");
             }
-            ScoreText.Text = "--";
         }
         private void ClearButton_Click(object sender, RoutedEventArgs e)
         {

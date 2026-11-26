@@ -1,3 +1,4 @@
 <Solution>
+  <Project Path="../Project_check_URL_ReleaseTool/Project_check_URL_ReleaseTool.csproj" Id="3f0acd45-ac87-4434-a93c-55d64115d69b" />
   <Project Path="Project_check_URL.csproj" Id="4500a5d5-a47c-4ed4-829e-ff4cfb49188d" />
 </Solution>

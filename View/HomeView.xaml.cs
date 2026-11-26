@@ -422,7 +422,7 @@ namespace Project_check_URL.View
                 }
                 else
                 {
-                    redirects.Finding = p.StatusCode.ToString();
+                    redirects.Finding = $"{(int)p.StatusCode} - {p.ReasonPhrase}";
                     redirects.Level = (300 < p.StatusCode && p.StatusCode < 400) ? "Warning" : "Safe";
                 }
                 redirects.Details = CheckDetails.ForRedirects(p);
@@ -519,6 +519,12 @@ namespace Project_check_URL.View
             });
 
         }
+        // Xuất toàn bộ kết quả (mọi thẻ ở trạng thái đã mở) ra file HTML
+        private void Export_Click(object sender, RoutedEventArgs e)
+        {
+            ExportCommand.Run(_lastUrl, _lastItems, msg => StatusText.Text = msg);
+        }
+
         private void Show_information(object sender, RoutedEventArgs e)
         {
             MessageBox.Show("Hello");

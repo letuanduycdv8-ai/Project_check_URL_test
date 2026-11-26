@@ -438,7 +438,7 @@
 
                     <MenuItem Header="_File">
                         <MenuItem Header="_Information more about URL" Click="Show_information"/>
-                        <MenuItem Header="_Export report"/>
+                        <MenuItem Header="_Export report" Click="Export_Click"/>
                         <MenuItem Header="Clear" Click="ClearButton_Click"/>
                         <Separator/>
                         <MenuItem Header="_Sign out"/>
@@ -484,6 +484,7 @@
 
                             <Button Style="{StaticResource QuickActionButton}"
                                     ToolTip="Export report"
+                                    Click="Export_Click"
                                     MouseEnter="Tool_Enter"
                                     MouseLeave="Leave"
                                     Tag="Export the full result">

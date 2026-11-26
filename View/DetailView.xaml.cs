@@ -192,11 +192,15 @@ namespace Project_check_URL.View
 
         private readonly List<DetailEntry> _all = new List<DetailEntry>();
         private readonly List<DetailSection> _sections;
+        private readonly string _url;
+        private readonly List<CheckItem> _items;
 
         public DetailView(string url, IEnumerable<CheckItem> items)
         {
             InitializeComponent();
             UrlText.Text = url;
+            _url = url;
+            _items = (items ?? Enumerable.Empty<CheckItem>()).ToList();
 
             const string offlineNote =
                 "Not available in offline mode. Turn on Online mode and check the link again.";
@@ -214,7 +218,7 @@ namespace Project_check_URL.View
                     offlineNote)
             };
 
-            foreach (CheckItem item in items ?? Enumerable.Empty<CheckItem>())
+            foreach (CheckItem item in _items)
             {
                 var entry = new DetailEntry(item);
                 entry.ItemChanged += (s, e) => RefreshSummaries();
@@ -233,7 +237,7 @@ namespace Project_check_URL.View
         }
 
         // 0 = static, 1 = VirusTotal, 2 = HTML/HTTP. Mục lạ mặc định vào "static".
-        private static int GroupOf(string criterion)
+        internal static int GroupOf(string criterion)
         {
             switch (criterion)
             {
@@ -325,6 +329,12 @@ namespace Project_check_URL.View
                 Dispatcher.BeginInvoke(new Action(() => card.BringIntoView()),
                     DispatcherPriority.Loaded);
             }
+        }
+
+        // Xuất toàn bộ trang này (mọi thẻ đã mở) ra file HTML. Chạy được cả khi offline.
+        private void Export_Click(object sender, RoutedEventArgs e)
+        {
+            ExportCommand.Run(_url, _items);
         }
 
         private void Back_Click(object sender, RoutedEventArgs e)

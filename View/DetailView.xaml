@@ -610,6 +610,20 @@
                     </StackPanel>
                 </Button>
 
+                <Button DockPanel.Dock="Right"
+                        Style="{StaticResource BackButtonStyle}"
+                        Click="Export_Click"
+                        ToolTip="Export the full result (works offline)">
+
+                    <StackPanel Orientation="Horizontal">
+                        <Image Source="/Picture/Export.png"
+                               Height="16"
+                               Width="Auto"
+                               Margin="0,0,8,0"/>
+                        <TextBlock Text="Export"/>
+                    </StackPanel>
+                </Button>
+
                 <StackPanel Margin="16,0,0,0"
                             VerticalAlignment="Center">
 

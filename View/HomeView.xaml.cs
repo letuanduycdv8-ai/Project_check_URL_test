@@ -218,6 +218,11 @@ namespace Project_check_URL.View
             }
 
             int myId = ++_checkId;
+
+            // Hủy lần quét trước nếu còn đang chạy
+            _scanCts?.Cancel();
+            _scanCts = null;
+
             // Offline check
             List<CheckFinding> homograph = Offline_check.CheckHomograph(uri);
             string domainLevel = homograph.Any(f => f.Level == "Danger") ? "Danger" :
@@ -284,11 +289,27 @@ namespace Project_check_URL.View
                 items.Add(blacklist);
             }
 
-            // 3) Hiển thị ngay kết quả offline
+            // 3) Hiển thị kết quả Offline Check
             _lastUrl = input;
             _lastItems = items;
             ShowResult(items, input);
-            StatusText.Text = "Checked: " + uri.Host + (OnlineMode ? " - scanning online..." : " (offline)");
+
+            // 4) KIỂM TRA DANGER: DỪNG TOÀN BỘ QUÁ TRÌNH
+            bool offlineDanger = items.Any(i => i.Level == "Danger");
+
+            if (offlineDanger)
+            {
+                StatusText.Text = "Blocked: Offline Check detected a dangerous URL.";
+
+                // Không chạy VirusTotal
+                // Không chạy HTTP Online Check
+                // Không tạo tác vụ mạng mới
+                return;
+            }
+
+            // 5) Chỉ tiếp tục Online Check nếu Offline Check không có Danger
+            StatusText.Text = "Checked: " + uri.Host +
+                              (OnlineMode ? " - scanning online..." : " (offline)");
 
             if (!OnlineMode) return;
 

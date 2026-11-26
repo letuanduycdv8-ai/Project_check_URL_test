@@ -18,11 +18,11 @@ namespace Project_check_URL
         public int Undetected { get; set; }
         public int Timeout { get; set; }
 
-        public DateTime? ScanDate { get; set; }          // giờ UTC VirusTotal hoàn tất phân tích
-        public string ScannedUrl { get; set; }           // URL mà VirusTotal ghi nhận
-        public string UrlId { get; set; }                // dùng để mở trang kết quả trên VirusTotal
-        public string UrlObjectJson { get; set; }        // JSON của GET /urls/{id} (điểm cộng đồng, phân loại...), null nếu không lấy được
-        public bool FromExistingReport { get; set; }     // true: dùng báo cáo có sẵn, không quét mới
+        public DateTime? ScanDate { get; set; }          // время UTC завершения анализа VirusTotal
+        public string ScannedUrl { get; set; }           // URL, зафиксированный VirusTotal
+        public string UrlId { get; set; }                // используется для открытия страницы результатов на VirusTotal
+        public string UrlObjectJson { get; set; }        // JSON от GET /urls/{id} (репутация сообщества, категории...), null если не удалось получить
+        public bool FromExistingReport { get; set; }     // true: используется готовый отчёт, повторное сканирование не выполняется
         public List<EngineResult> Engines { get; private set; }
 
         public ScanResult()
@@ -30,7 +30,7 @@ namespace Project_check_URL
             Engines = new List<EngineResult>();
         }
 
-        // Trang kết quả đầy đủ trên VirusTotal (null nếu response không có url id)
+        // Полная страница результатов на VirusTotal (null, если в ответе нет url id)
         public string ReportLink
         {
             get
@@ -47,16 +47,16 @@ namespace Project_check_URL
         }
     }
 
-    // Kết quả của một engine bảo mật trong VirusTotal
+    // Результат одного антивирусного движка в VirusTotal
     internal class EngineResult
     {
         public string Engine { get; set; }
         public string Category { get; set; }   // malicious / suspicious / harmless / undetected / timeout ...
-        public string Result { get; set; }     // vd "phishing", "clean", "unrated"
-        public string Method { get; set; }     // vd "blacklist"
+        public string Result { get; set; }     // например "phishing", "clean", "unrated"
+        public string Method { get; set; }     // например "blacklist"
     }
 
-    // Vượt quota (HTTP 429)
+    // Превышение квоты (HTTP 429)
     internal class VirusTotalQuotaException : Exception
     {
         public TimeSpan? RetryAfter { get; private set; }
@@ -68,7 +68,7 @@ namespace Project_check_URL
         }
     }
 
-    // Quét chưa xong sau số lần thử tối đa; giữ lại ID để lấy kết quả sau
+    // Сканирование не завершилось после максимального числа попыток; ID сохраняется для последующего получения результата
     internal class ScanTimeoutException : TimeoutException
     {
         public string AnalysisId { get; private set; }
@@ -88,23 +88,23 @@ namespace Project_check_URL
         public API_request(string apiKey)
         {
             if (string.IsNullOrWhiteSpace(apiKey))
-                throw new ArgumentException("API key không được để trống.", "apiKey");
+                throw new ArgumentException("API key must not be empty.", "apiKey");
 
             _apiKey = apiKey;
         }
 
-        // Báo cáo có sẵn trên VirusTotal chỉ được dùng lại nếu mới hơn mức này
+        // Готовый отчёт VirusTotal можно использовать повторно, только если он новее этого порога
         private static readonly TimeSpan MaxExistingReportAge = TimeSpan.FromHours(24);
 
-        // Lấy kết quả cho URL. Đường nhanh: nếu VirusTotal đã có báo cáo trong 24 giờ gần đây thì dùng luôn
-        // (1 request, không phải đợi quét, đỡ quota). Nếu không thì gửi quét mới như trước.
-        // Mặc định poll 15 giây/lần để không vượt quota bản free (4 request/phút).
+        // Получает результат для URL. Быстрый путь: если у VirusTotal есть отчёт за последние 24 часа, используется он
+        // (1 запрос, без ожидания сканирования, экономия квоты). Иначе отправляется новое сканирование, как раньше.
+        // По умолчанию опрос каждые 15 секунд, чтобы не превышать квоту бесплатного тарифа (4 запроса/минуту).
         public async Task<ScanResult> ScanUrlAsync(string url, int maxAttempts = 8, int delayMs = 15000)
         {
             if (string.IsNullOrWhiteSpace(url))
-                throw new ArgumentException("URL không được để trống.", "url");
+                throw new ArgumentException("URL must not be empty.", "url");
 
-            // 1) Có báo cáo mới sẵn chưa? Lỗi ở bước này không quan trọng, cứ quét mới.
+            // 1) Есть ли уже свежий отчёт? Ошибка на этом шаге не критична — выполняем новое сканирование.
             string existingJson = null;
             try { existingJson = await GetUrlObjectJsonAsync(UrlIdFromText(url)).ConfigureAwait(false); }
             catch (Exception) { existingJson = null; }
@@ -113,7 +113,7 @@ namespace Project_check_URL
             if (existing != null)
                 return existing;
 
-            // 2) Quét mới
+            // 2) Новое сканирование
             string analysisId = await SubmitUrlAsync(url).ConfigureAwait(false);
 
             for (int i = 0; i < maxAttempts; i++)
@@ -123,7 +123,7 @@ namespace Project_check_URL
                 ScanResult result = await GetAnalysisAsync(analysisId).ConfigureAwait(false);
                 if (result.IsCompleted)
                 {
-                    // 3) Lấy thêm điểm cộng đồng, phân loại... (không bắt buộc: lỗi thì bỏ qua)
+                    // 3) Дополнительно получаем репутацию сообщества, категории... (необязательно: при ошибке пропускаем)
                     try
                     {
                         string id = string.IsNullOrEmpty(result.UrlId) ? UrlIdFromText(url) : result.UrlId;
@@ -135,18 +135,18 @@ namespace Project_check_URL
             }
 
             throw new ScanTimeoutException(
-                "VirusTotal chưa quét xong (analysis ID: " + analysisId + "), hãy thử lại sau.",
+                "VirusTotal has not finished scanning (analysis ID: " + analysisId + "), please try again later.",
                 analysisId);
         }
 
-        // ID URL theo VirusTotal: base64 an toàn cho URL (+ -> -, / -> _), bỏ dấu "="
+        // ID URL по VirusTotal: base64, безопасный для URL (+ -> -, / -> _), без символа "="
         internal static string UrlIdFromText(string url)
         {
             return Convert.ToBase64String(Encoding.UTF8.GetBytes(url))
                 .TrimEnd('=').Replace('+', '-').Replace('/', '_');
         }
 
-        // GET /urls/{id}: null nếu VirusTotal chưa từng thấy URL này (404)
+        // GET /urls/{id}: null, если VirusTotal ещё не видел этот URL (404)
         private async Task<string> GetUrlObjectJsonAsync(string urlId)
         {
             using (var request = new HttpRequestMessage(HttpMethod.Get, BaseUrl + "/urls/" + urlId))
@@ -156,8 +156,8 @@ namespace Project_check_URL
             }
         }
 
-        // Dựng kết quả từ đối tượng URL có sẵn. Trả null nếu thiếu dữ liệu hoặc báo cáo đã cũ
-        // (khi đó phải quét mới). Dựng lại JSON dạng /analyses để dùng chung VtReport.Parse.
+        // Строит результат из готового объекта URL. Возвращает null, если данных недостаточно или отчёт устарел
+        // (в этом случае нужно новое сканирование). Восстанавливает JSON в формате /analyses для общего использования VtReport.Parse.
         internal static ScanResult TryBuildFromUrlObject(string url, string urlJson, DateTime nowUtc)
         {
             if (string.IsNullOrWhiteSpace(urlJson)) return null;
@@ -203,11 +203,11 @@ namespace Project_check_URL
             }
             catch (Exception)
             {
-                return null;     // dữ liệu lạ: quét mới cho chắc
+                return null;     // необычные данные: для надёжности выполняем новое сканирование
             }
         }
 
-        // Bước 1: gửi URL, nhận analysis ID
+        // Шаг 1: отправка URL, получение analysis ID
         public async Task<string> SubmitUrlAsync(string url)
         {
             var form = new FormUrlEncodedContent(
@@ -225,13 +225,13 @@ namespace Project_check_URL
 
                 object id;
                 if (data == null || !data.TryGetValue("id", out id) || id == null)
-                    throw new InvalidOperationException("Không đọc được analysis ID từ phản hồi.");
+                    throw new InvalidOperationException("Could not read analysis ID from the response.");
 
                 return id.ToString();
             }
         }
 
-        // Bước 2: lấy kết quả quét
+        // Шаг 2: получение результата сканирования
         public async Task<ScanResult> GetAnalysisAsync(string analysisId)
         {
             using (var request = new HttpRequestMessage(
@@ -242,9 +242,9 @@ namespace Project_check_URL
                 string json = await SendAsync(request).ConfigureAwait(false);
 
                 ScanResult result = ParseSummary(analysisId, json);
-                
 
-                // Chỉ lưu khi quét xong, tránh ghi đè bằng bản queued/in-progress
+
+                // Сохраняем только после завершения сканирования, чтобы не перезаписать версией queued/in-progress
                 if (result.IsCompleted)
                     VT_ScanStore.Save(analysisId, json);
 
@@ -271,7 +271,7 @@ namespace Project_check_URL
                 result.Undetected = GetInt(stats, "undetected");
                 result.Timeout = GetInt(stats, "timeout");
 
-                // Ngày phân tích (unix giây, UTC)
+                // Дата анализа (unix-секунды, UTC)
                 object date;
                 if (attrs.TryGetValue("date", out date) && date != null)
                 {
@@ -283,7 +283,7 @@ namespace Project_check_URL
                     catch (Exception) { }
                 }
 
-                // Kết quả từng engine
+                // Результаты по каждому движку
                 Dictionary<string, object> engines = GetObject(attrs, "results");
                 if (engines != null)
                 {
@@ -304,7 +304,7 @@ namespace Project_check_URL
                 }
             }
 
-            // URL mà VirusTotal đã phân tích (meta.url_info)
+            // URL, проанализированный VirusTotal (meta.url_info)
             Dictionary<string, object> urlInfo = GetObject(GetObject(root, "meta"), "url_info");
             if (urlInfo != null)
             {
@@ -349,7 +349,7 @@ namespace Project_check_URL
             catch (Exception) { return 0; }
         }
 
-        // Lấy error.message từ JSON lỗi của VirusTotal, nếu không được thì trả nguyên body
+        // Извлекает error.message из JSON ошибки VirusTotal, иначе возвращает тело ответа как есть
         private static string ExtractErrorMessage(string body)
         {
             try
@@ -364,15 +364,15 @@ namespace Project_check_URL
             }
             catch (Exception)
             {
-                // body không phải JSON, dùng nguyên văn
+                // тело не является JSON, используем как есть
             }
             return body;
         }
 
         // ---------- HTTP ----------
 
-        // Gửi request và xử lý lỗi HTTP
-        // nullOn404 = true: 404 (chưa có dữ liệu) trả về null thay vì ném lỗi
+        // Отправляет запрос и обрабатывает ошибки HTTP
+        // nullOn404 = true: 404 (данных ещё нет) возвращает null вместо выброса исключения
         private static async Task<string> SendAsync(HttpRequestMessage request, bool nullOn404 = false)
         {
             using (HttpResponseMessage response = await ClientMng.Client.SendAsync(request).ConfigureAwait(false))
@@ -388,14 +388,14 @@ namespace Project_check_URL
                 switch (response.StatusCode)
                 {
                     case HttpStatusCode.Unauthorized:
-                        throw new InvalidOperationException("API key không hợp lệ.");
+                        throw new InvalidOperationException("Invalid API key.");
 
                     case (HttpStatusCode)429:
                         TimeSpan? retryAfter = null;
                         if (response.Headers.RetryAfter != null)
                             retryAfter = response.Headers.RetryAfter.Delta;
                         throw new VirusTotalQuotaException(
-                            "Vượt quota VirusTotal, hãy đợi rồi thử lại.", retryAfter);
+                            "VirusTotal quota exceeded, please wait and try again.", retryAfter);
 
                     default:
                         throw new HttpRequestException(

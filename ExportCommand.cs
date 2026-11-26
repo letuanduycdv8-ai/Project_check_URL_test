@@ -8,9 +8,9 @@ using Project_check_URL.View;
 namespace Project_check_URL
 {
     // ------------------------------------------------------------------
-    // Dùng chung cho nút Export ở HomeView và DetailView:
-    // hộp thoại lưu file -> ghi báo cáo HTML -> mở file vừa xuất.
-    // Toàn bộ chạy cục bộ, không cần internet.
+    // Общее для кнопки Export в HomeView и DetailView:
+    // диалог сохранения файла -> запись HTML-отчёта -> открытие только что экспортированного файла.
+    // Всё выполняется локально, интернет не требуется.
     // ------------------------------------------------------------------
     public static class ExportCommand
     {

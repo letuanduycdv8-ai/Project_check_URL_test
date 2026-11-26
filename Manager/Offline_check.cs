@@ -9,8 +9,8 @@ using System.Text;
 
 namespace Project_check_URL.View
 {
-    /// <summary>One row for ResultGrid (bind: Criterion, Finding, Level).</summary>
-    
+    /// <summary>Одна строка для ResultGrid (привязка: Criterion, Finding, Level).</summary>
+
     public sealed class CheckFinding
     {
         public CheckFinding(string criterion, string finding, string level)
@@ -22,13 +22,13 @@ namespace Project_check_URL.View
 
         public string Criterion { get; }
         public string Finding { get; }
-        public string Level { get; }   // "Safe", "Warning" or "Danger"
+        public string Level { get; }   // "Safe", "Warning" или "Danger"
     }
 
     internal static class Offline_check
     {
         // ------------------------------------------------------------------
-        // Your original code (suffix list extended with a few more entries)
+        // Исходный код (список суффиксов расширен несколькими записями)
         // ------------------------------------------------------------------
         private static readonly HashSet<string> MultiPartSuffixes =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -49,7 +49,7 @@ namespace Project_check_URL.View
             if (labels.Length <= 2) return string.Join(".", labels);
 
             string last2 = labels[labels.Length - 2] + "." + labels[labels.Length - 1];
-            return MultiPartSuffixes.Contains(last2)? string.Join(".", labels.Skip(labels.Length - 3)): last2;
+            return MultiPartSuffixes.Contains(last2) ? string.Join(".", labels.Skip(labels.Length - 3)) : last2;
         }
 
         public static string ToUnicodeSafe(string[] labels, out bool broken)
@@ -61,7 +61,7 @@ namespace Project_check_URL.View
             {
                 try
                 {
-                    parts.Add(l.StartsWith("xn--", StringComparison.Ordinal)? idn.GetUnicode(l): l);
+                    parts.Add(l.StartsWith("xn--", StringComparison.Ordinal) ? idn.GetUnicode(l) : l);
                 }
                 catch (ArgumentException)
                 {
@@ -73,7 +73,7 @@ namespace Project_check_URL.View
         }
 
         // ------------------------------------------------------------------
-        // Brand list: add the banks and services your users care about
+        // Список брендов: добавьте банки и сервисы, важные для ваших пользователей
         // ------------------------------------------------------------------
         public static readonly string[] Brands =
         {
@@ -90,7 +90,7 @@ namespace Project_check_URL.View
             new HashSet<string>(Brands, StringComparer.OrdinalIgnoreCase);
 
         // ------------------------------------------------------------------
-        // Loading confusables.txt (call once at startup)
+        // Загрузка confusables.txt (вызывать один раз при запуске)
         // ------------------------------------------------------------------
         private static Dictionary<int, string> _map = new Dictionary<int, string>();
         private static Dictionary<string, string> _brandSkeletons =
@@ -99,8 +99,8 @@ namespace Project_check_URL.View
         public static bool IsConfusablesLoaded { get; private set; }
 
         /// <summary>
-        /// Reads confusables.txt into memory. Returns false (and the look-alike check is
-        /// skipped) if the file is missing or empty.
+        /// Читает confusables.txt в память. Возвращает false (и проверка похожих символов
+        /// пропускается), если файл отсутствует или пуст.
         /// </summary>
         public static bool LoadConfusables(string path)
         {
@@ -117,7 +117,7 @@ namespace Project_check_URL.View
                 int hash = line.IndexOf('#');
                 if (hash >= 0) line = line.Substring(0, hash);
 
-                // Line format:  0430 ;  0061 ;  MA   # comment
+                // Формат строки:  0430 ;  0061 ;  MA   # комментарий
                 string[] fields = line.Split(';');
                 if (fields.Length < 2) continue;
 
@@ -137,8 +137,8 @@ namespace Project_check_URL.View
                     }
                     map[source] = target.ToString();
                 }
-                catch (FormatException) { /* skip malformed line */ }
-                catch (ArgumentOutOfRangeException) { /* skip malformed line */ }
+                catch (FormatException) { /* пропускаем некорректную строку */ }
+                catch (ArgumentOutOfRangeException) { /* пропускаем некорректную строку */ }
             }
 
             if (map.Count == 0) return false;
@@ -157,17 +157,17 @@ namespace Project_check_URL.View
         }
 
         // ------------------------------------------------------------------
-        // Main entry point: returns rows for ResultGrid
+        // Главная точка входа: возвращает строки для ResultGrid
         // ------------------------------------------------------------------
         public static List<CheckFinding> CheckHomograph(Uri uri)
         {
             var findings = new List<CheckFinding>();
 
-            // IP hosts are handled by other checks
-            if (uri.HostNameType != UriHostNameType.Dns) 
+            // IP-хосты обрабатываются другими проверками
+            if (uri.HostNameType != UriHostNameType.Dns)
             {
                 findings.Add(CheckIpHost(uri));
-                
+
                 return findings;
             }
 
@@ -189,13 +189,13 @@ namespace Project_check_URL.View
             else
                 findings.Add(new CheckFinding("Punycode (IDN)", "No punycode labels", "Safe"));
 
-            // 2) Mixed writing systems inside one label
+            // 2) Смешанные системы письма внутри одной метки
             string mixed = FindMixedScriptLabel(decodedLabels);
             findings.Add(mixed != null
                 ? new CheckFinding("Mixed writing systems", mixed, "Danger")
                 : new CheckFinding("Mixed writing systems", "Each label uses a single writing system", "Safe"));
 
-            // 3) Look-alike of a known brand (needs confusables.txt)
+            // 3) Похожесть на известный бренд (требуется confusables.txt)
             if (!IsConfusablesLoaded)
             {
                 findings.Add(new CheckFinding("Brand impersonation",
@@ -227,18 +227,18 @@ namespace Project_check_URL.View
 
             string skeleton = LooseSkeleton(registrable);
 
-            // Same skeleton: looks identical to a brand but is a different string
+            // Одинаковый скелет: выглядит идентично бренду, но это другая строка
             string brand;
             if (_brandSkeletons.TryGetValue(skeleton, out brand))
                 return new CheckFinding("Brand impersonation",
                     "'" + registrable + "' looks identical to " + brand, "Danger");
 
-            // One edit away from a brand skeleton: typosquatting
+            // Одно отличие от скелета бренда: тайпсквоттинг
             if (skeleton.Length >= 6)
             {
                 foreach (KeyValuePair<string, string> kv in _brandSkeletons)
                 {
-                    // very short brand names (acb, x...) would flag too many innocent domains
+                    // очень короткие имена брендов (acb, x...) дали бы слишком много ложных срабатываний
                     if (kv.Value.Split('.')[0].Length >= 5 &&
                         Math.Abs(kv.Key.Length - skeleton.Length) <= 1 &&
                         EditDistance(skeleton, kv.Key) == 1)
@@ -249,7 +249,7 @@ namespace Project_check_URL.View
 
             return new CheckFinding("Brand impersonation", "No resemblance to known brands", "Safe");
         }
-        // IP local : 
+        // Локальный IP :
         private static CheckFinding CheckIpHost(Uri uri)
         {
             IPAddress ip;
@@ -266,9 +266,9 @@ namespace Project_check_URL.View
         }
 
         // ------------------------------------------------------------------
-        // Skeleton (UTS #39): NFD -> map confusables -> NFD.
-        // "Loose" also lowercases and drops combining marks so that diacritics
-        // cannot be used to dodge the comparison.
+        // Скелет (UTS #39): NFD -> сопоставление confusables -> NFD.
+        // "Loose" также приводит к нижнему регистру и удаляет комбинирующие знаки,
+        // чтобы диакритика не могла использоваться для обхода сравнения.
         // ------------------------------------------------------------------
         public static string LooseSkeleton(string s)
         {
@@ -310,7 +310,7 @@ namespace Project_check_URL.View
         }
 
         // ------------------------------------------------------------------
-        // Writing-system detection
+        // Определение системы письма
         // ------------------------------------------------------------------
         private enum Script
         {
@@ -318,7 +318,7 @@ namespace Project_check_URL.View
             Han, Hiragana, Katakana, Hangul, Other
         }
 
-        /// <summary>Returns null for characters that belong to no particular script (digits, '-', marks).</summary>
+        /// <summary>Возвращает null для символов, не относящихся к конкретной системе письма (цифры, '-', знаки).</summary>
         private static Script? ScriptOf(int c)
         {
             if (c >= 0xD800 && c <= 0xDFFF) return Script.Other;
@@ -360,7 +360,7 @@ namespace Project_check_URL.View
             return Script.Other;
         }
 
-        // Japanese (Han+Hiragana+Katakana) and Korean (Han+Hangul) legitimately mix scripts
+        // Японский (Han+Hiragana+Katakana) и корейский (Han+Hangul) легитимно смешивают системы письма
         private static bool IsAllowedCombination(HashSet<Script> set)
         {
             return set.IsSubsetOf(new[] { Script.Han, Script.Hiragana, Script.Katakana }) ||
@@ -386,7 +386,7 @@ namespace Project_check_URL.View
 
 
         // ------------------------------------------------------------------
-        // Damerau-Levenshtein (optimal string alignment) distance
+        // Расстояние Дамерау-Левенштейна (optimal string alignment)
         // ------------------------------------------------------------------
         private static int EditDistance(string a, string b)
         {

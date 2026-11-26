@@ -8,23 +8,23 @@ using Project_check_URL.View;
 namespace Project_check_URL
 {
     // ------------------------------------------------------------------
-    // Xuất kết quả kiểm tra ra một file HTML độc lập (không cần thư viện ngoài).
+    // Экспортирует результаты проверки в автономный HTML-файл (без внешних библиотек).
     //
-    // Báo cáo được dựng thẳng từ dữ liệu (CheckItem / DetailLine), KHÔNG chụp lại
-    // giao diện, nên không phụ thuộc vào việc thẻ nào đang đóng/mở trong DetailView:
-    // mọi thẻ luôn được viết ra ở trạng thái "đã bấm mở" (đủ About, Details, Assessment).
+    // Отчёт строится напрямую из данных (CheckItem / DetailLine), БЕЗ снимка
+    // интерфейса, поэтому не зависит от того, какие карточки открыты/закрыты в DetailView:
+    // все карточки всегда записываются в состоянии "развёрнуто" (About, Details, Assessment полностью).
     //
-    // Muốn có PDF: mở file HTML trong trình duyệt -> Ctrl+P -> "Save as PDF".
-    // CSS đã có @media print để cắt trang gọn.
+    // Для получения PDF: откройте HTML-файл в браузере -> Ctrl+P -> "Save as PDF".
+    // В CSS уже есть @media print для аккуратного разбиения на страницы.
     // ------------------------------------------------------------------
     public static class ReportExporter
     {
         private const string OfflineNote =
             "Not available in offline mode. Turn on Online mode and check the link again.";
 
-        // Phải khớp thứ tự nhóm của DetailView.GroupOf: 0 = static, 1 = VirusTotal, 2 = HTML
-        private static readonly string[] SectionNumbers  = { "1", "2", "3" };
-        private static readonly string[] SectionTitles   = { "STATIC CHECK", "VIRUSTOTAL RESULT", "HTML ANALYSIS" };
+        // Должно совпадать с порядком групп DetailView.GroupOf: 0 = static, 1 = VirusTotal, 2 = HTML
+        private static readonly string[] SectionNumbers = { "1", "2", "3" };
+        private static readonly string[] SectionTitles = { "STATIC CHECK", "VIRUSTOTAL RESULT", "HTML ANALYSIS" };
         private static readonly string[] SectionSubtitles =
         {
             "Offline analysis of the link and its domain name",
@@ -41,7 +41,7 @@ namespace Project_check_URL
             return WebUtility.HtmlEncode(s ?? "");
         }
 
-        // Giống DetailEntry.Level: giá trị lạ coi là Warning
+        // Как DetailEntry.Level: необычное значение считается Warning
         private static string LevelOf(CheckItem item)
         {
             string l = item.Level;
@@ -72,7 +72,7 @@ namespace Project_check_URL
             var sb = new StringBuilder(16 * 1024);
             sb.AppendLine("<!DOCTYPE html>");
             sb.AppendLine("<html lang=\"en\"><head><meta charset=\"utf-8\">");
-            // Báo cáo chỉ là văn bản tĩnh: chặn mọi script/tài nguyên ngoài cho chắc
+            // Отчёт — только статический текст: на всякий случай блокируем все скрипты/внешние ресурсы
             sb.AppendLine("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\">");
             sb.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
             sb.AppendLine("<title>URL check report</title>");
@@ -80,7 +80,7 @@ namespace Project_check_URL
 
             sb.AppendLine("<header class=\"top\">");
             sb.AppendLine("<h1>URL check report</h1>");
-            // URL chỉ hiện dạng chữ, KHÔNG phải link bấm được: link có thể độc hại
+            // URL отображается только как текст, НЕ как кликабельная ссылка: ссылка может быть вредоносной
             sb.Append("<p class=\"url\">").Append(E(url)).AppendLine("</p>");
             sb.Append("<p class=\"meta\">Generated ")
               .Append(E(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss zzz")))
@@ -92,7 +92,7 @@ namespace Project_check_URL
               .Append("<span class=\"count lvl-Danger\">").Append(danger).AppendLine(" Danger</span></div>");
             sb.AppendLine("</header>");
 
-            // Chia nhóm đúng như DetailView
+            // Группируем точно как в DetailView
             var groups = new List<CheckItem>[3];
             for (int g = 0; g < 3; g++) groups[g] = new List<CheckItem>();
             foreach (CheckItem it in list)
@@ -122,7 +122,7 @@ namespace Project_check_URL
             return sb.ToString();
         }
 
-        // Một thẻ ở trạng thái đã mở hoàn toàn
+        // Одна карточка в полностью развёрнутом состоянии
         private static void AppendCard(StringBuilder sb, CheckItem it)
         {
             string level = LevelOf(it);

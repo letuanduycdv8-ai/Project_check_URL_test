@@ -73,7 +73,6 @@
     <Compile Include="ExportCommand.cs" />
     <Compile Include="Manager\DomainInfo.cs" />
     <Compile Include="Manager\HtmlScan.cs" />
-    <Compile Include="Manager\RedirectAnalysis.cs" />
     <Compile Include="View\Animation.cs" />
     <Compile Include="UserRepository.cs" />
     <Compile Include="Manager\Offline_check.cs" />

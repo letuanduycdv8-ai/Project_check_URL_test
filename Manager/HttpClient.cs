@@ -20,13 +20,13 @@ namespace Project_check_URL
         public string FinalUrl { get; set; }
         public int StatusCode { get; set; }
         public string ReasonPhrase { get; set; }
-        public string ContentType { get; set; }        // chỉ phần media type, vd "text/html"
-        public string RawContentType { get; set; }     // nguyên giá trị header, vd "text/html; charset=utf-8"
+        public string ContentType { get; set; }        // только media type, например "text/html"
+        public string RawContentType { get; set; }     // исходное значение заголовка, например "text/html; charset=utf-8"
         public Dictionary<string, string> Headers { get; set; }
         public List<string> RedirectChain { get; set; }
-        public List<HttpHop> Hops { get; set; }        // chi tiết từng bước đã nhận được phản hồi
+        public List<HttpHop> Hops { get; set; }        // детали каждого шага, где был получен ответ
         public string Error { get; set; }
-        public DateTime ProbedAt { get; set; }         // giờ UTC bắt đầu thăm dò
+        public DateTime ProbedAt { get; set; }         // время UTC начала проверки
 
         public HttpProbeResult()
         {
@@ -36,16 +36,16 @@ namespace Project_check_URL
         }
     }
 
-    // Một bước trong chuỗi chuyển hướng (một lần gửi GET và nhận header)
+    // Один шаг в цепочке перенаправлений (один GET-запрос и получение заголовков)
     internal class HttpHop
     {
         public string Url { get; set; }
-        public string Ips { get; set; }                // các IP đã phân giải và kiểm tra, cách nhau bởi ", "
+        public string Ips { get; set; }                // разрешённые и проверенные IP, через ", "
         public int StatusCode { get; set; }
         public string ReasonPhrase { get; set; }
-        public string Location { get; set; }           // header Location nếu có
+        public string Location { get; set; }           // заголовок Location, если есть
 
-        // chỉ có khi https
+        // только для https
         public string TlsProtocol { get; set; }
         public string CertSubject { get; set; }
         public string CertIssuer { get; set; }
@@ -53,10 +53,10 @@ namespace Project_check_URL
         public DateTime? CertNotAfter { get; set; }
     }
 
-    // Bản dành cho .NET Framework 4.7.2 / 4.8 (C# 7.3).
-    // HttpClient của .NET Framework không cho can thiệp vào bước kết nối, nên phần thăm dò URL
-    // tự mở kết nối TCP tới ĐÚNG IP đã kiểm tra, tự làm TLS (nếu https) và tự gửi/đọc HTTP/1.1.
-    // Chỉ đọc phần header, không đọc body.
+    // Версия для .NET Framework 4.7.2 / 4.8 (C# 7.3).
+    // HttpClient в .NET Framework не позволяет вмешиваться в этап соединения, поэтому проверка URL
+    // сама открывает TCP-соединение к УЖЕ проверенному IP, сама выполняет TLS (если https) и сама отправляет/читает HTTP/1.1.
+    // Читаются только заголовки, тело не читается.
     internal static class ClientMng
     {
         private const int MaxRedirects = 5;
@@ -68,7 +68,7 @@ namespace Project_check_URL
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-        // Dùng cho VirusTotal API: chỉ gọi tới địa chỉ cố định nên không cần chặn IP
+        // Используется для VirusTotal API: обращается только к фиксированному адресу, поэтому блокировка IP не нужна
         public static readonly HttpClient Client = CreateApiClient("Project-check-URL/1.0");
 
         private static HttpClient CreateApiClient(string userAgent)
@@ -84,7 +84,7 @@ namespace Project_check_URL
             return client;
         }
 
-        // ===== Kết quả thô của một lần gửi =====
+        // ===== Сырой результат одной отправки =====
         private sealed class RawResponse
         {
             public int StatusCode;
@@ -127,14 +127,14 @@ namespace Project_check_URL
                 {
                     for (int hop = 0; hop <= MaxRedirects; hop++)
                     {
-                        // Ghi trước khi kiểm tra để hop bị chặn vẫn hiện trong chuỗi
+                        // Записываем до проверки, чтобы заблокированный шаг всё равно отображался в цепочке
                         result.RedirectChain.Add(current.AbsoluteUri);
                         result.FinalUrl = current.AbsoluteUri;
 
                         string blocked = PreCheckTarget(current);
                         if (blocked != null) { result.Error = blocked; return result; }
 
-                        // 1) Phân giải DNS ĐÚNG MỘT LẦN
+                        // 1) Разрешение DNS РОВНО ОДИН РАЗ
                         IPAddress[] ips;
                         try
                         {
@@ -151,7 +151,7 @@ namespace Project_check_URL
                             return result;
                         }
 
-                        // 2) Kiểm tra TẤT CẢ IP, chỉ cần một IP không công khai là chặn
+                        // 2) Проверяем ВСЕ IP; достаточно одного непубличного IP для блокировки
                         foreach (IPAddress ip in ips)
                         {
                             if (!IsPublicAddress(ip))
@@ -161,7 +161,7 @@ namespace Project_check_URL
                             }
                         }
 
-                        // 3) Kết nối thẳng tới các IP vừa kiểm tra (không phân giải lại)
+                        // 3) Подключаемся напрямую к только что проверенным IP (без повторного разрешения)
                         RawResponse resp = await ProbeOnceAsync(current, ips, token).ConfigureAwait(false);
 
                         result.StatusCode = resp.StatusCode;
@@ -177,7 +177,7 @@ namespace Project_check_URL
                             result.ContentType = (semi >= 0 ? ctype.Substring(0, semi) : ctype).Trim();
                         }
 
-                        // Lưu lại bước này để màn hình Detail hiển thị
+                        // Сохраняем этот шаг для отображения на экране Detail
                         string location;
                         resp.Headers.TryGetValue("Location", out location);
                         result.Hops.Add(new HttpHop
@@ -194,7 +194,7 @@ namespace Project_check_URL
                             CertNotAfter = resp.CertNotAfter
                         });
 
-                        result.Headers.Clear();                       // chỉ giữ header của bước cuối
+                        result.Headers.Clear();                       // сохраняем заголовки только последнего шага
                         foreach (var kv in resp.Headers)
                             result.Headers[kv.Key] = kv.Value;
 
@@ -213,7 +213,7 @@ namespace Project_check_URL
                                 continue;
                             }
                         }
-                        return result;                                // hết chuyển hướng
+                        return result;                                // перенаправлений больше нет
                     }
                     result.Error = "Too many redirects (max " + MaxRedirects + ")";
                 }
@@ -223,7 +223,7 @@ namespace Project_check_URL
                 }
                 catch (Exception) when (token.IsCancellationRequested)
                 {
-                    // Khi hủy, socket bị đóng nên ném ObjectDisposedException/IOException
+                    // При отмене сокет закрывается, что приводит к ObjectDisposedException/IOException
                     result.Error = ct.IsCancellationRequested ? "Cancelled" : "Timeout";
                 }
                 catch (AuthenticationException ex)
@@ -251,7 +251,7 @@ namespace Project_check_URL
             return result;
         }
 
-        // Kiểm tra sớm scheme và IP literal; lớp chặn chính là kiểm tra IP sau khi phân giải ở RunAsync
+        // Ранняя проверка scheme и IP-литерала; основная блокировка — проверка IP после разрешения в RunAsync
         internal static string PreCheckTarget(Uri uri)
         {
             if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
@@ -269,7 +269,7 @@ namespace Project_check_URL
             return uri.HostNameType == UriHostNameType.Dns ? uri.IdnHost : uri.DnsSafeHost;
         }
 
-        // Dns.GetHostAddressesAsync của .NET Framework không nhận CancellationToken
+        // Dns.GetHostAddressesAsync в .NET Framework не принимает CancellationToken
         private static async Task<IPAddress[]> ResolveAsync(string host, CancellationToken token)
         {
             Task<IPAddress[]> dnsTask = Dns.GetHostAddressesAsync(host);
@@ -278,7 +278,7 @@ namespace Project_check_URL
             Task done = await Task.WhenAny(dnsTask, cancelTask).ConfigureAwait(false);
             if (done != dnsTask)
             {
-                // Nuốt lỗi của dnsTask (nếu có) để không thành "unobserved exception"
+                // Гасим ошибку dnsTask (если есть), чтобы не возникло "unobserved exception"
                 var ignored = dnsTask.ContinueWith(t => { var e = t.Exception; },
                     TaskContinuationOptions.OnlyOnFaulted);
                 token.ThrowIfCancellationRequested();
@@ -286,7 +286,7 @@ namespace Project_check_URL
             return await dnsTask.ConfigureAwait(false);
         }
 
-        // ===== Mở kết nối tới một trong các IP đã kiểm tra =====
+        // ===== Открытие соединения к одному из проверенных IP =====
         private static async Task<TcpClient> ConnectAsync(IPAddress[] ips, int port, CancellationToken token)
         {
             Exception last = null;
@@ -306,18 +306,18 @@ namespace Project_check_URL
                 {
                     tcp.Close();
                     token.ThrowIfCancellationRequested();
-                    last = ex;                                    // thử IP tiếp theo
+                    last = ex;                                    // пробуем следующий IP
                 }
             }
             throw new IOException("Could not connect to any address",
                 last ?? new SocketException((int)SocketError.HostUnreachable));
         }
 
-        // ===== Gửi một request GET và đọc phần header =====
+        // ===== Отправка GET-запроса и чтение заголовков =====
         private static async Task<RawResponse> ProbeOnceAsync(Uri uri, IPAddress[] ips, CancellationToken token)
         {
             using (TcpClient tcp = await ConnectAsync(ips, uri.Port, token).ConfigureAwait(false))
-            using (token.Register(() => tcp.Close()))             // hủy giữa chừng thì đóng socket
+            using (token.Register(() => tcp.Close()))             // при отмене закрываем сокет
             {
                 Stream stream = tcp.GetStream();
                 SslStream tlsInfo = null;
@@ -325,7 +325,7 @@ namespace Project_check_URL
                 {
                     if (uri.Scheme == Uri.UriSchemeHttps)
                     {
-                        // TLS xác thực chứng chỉ theo TÊN MIỀN gốc, dù socket đang nối tới IP
+                        // TLS проверяет сертификат по ИСХОДНОМУ ДОМЕННОМУ ИМЕНИ, хотя сокет подключён к IP
                         var ssl = new SslStream(stream, false);
                         stream = ssl;
                         await ssl.AuthenticateAsClientAsync(
@@ -349,7 +349,7 @@ namespace Project_check_URL
             }
         }
 
-        // Ghi lại giao thức TLS và chứng chỉ của máy chủ (nếu là https)
+        // Сохраняет протокол TLS и сертификат сервера (если https)
         private static void FillTlsInfo(RawResponse resp, SslStream ssl)
         {
             if (ssl == null) return;
@@ -368,7 +368,7 @@ namespace Project_check_URL
             }
             catch (Exception)
             {
-                // không đọc được chứng chỉ thì bỏ qua, các thông tin khác vẫn dùng được
+                // если сертификат прочитать не удалось, пропускаем; остальные данные остаются доступны
             }
         }
 
@@ -385,13 +385,13 @@ namespace Project_check_URL
             sb.Append("User-Agent: ").Append(BrowserUserAgent).Append("\r\n");
             sb.Append("Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\n");
             sb.Append("Accept-Language: en-US,en;q=0.9\r\n");
-            sb.Append("Accept-Encoding: identity\r\n");           // không nén, và ta cũng không đọc body
+            sb.Append("Accept-Encoding: identity\r\n");           // без сжатия, тело мы всё равно не читаем
             sb.Append("Connection: close\r\n");
             sb.Append("\r\n");
             return Encoding.ASCII.GetBytes(sb.ToString());
         }
 
-        // Đọc tới khi gặp \r\n\r\n, giới hạn 64 KB
+        // Читает до \r\n\r\n, ограничение 64 КБ
         private static async Task<string> ReadHeaderBlockAsync(Stream stream, CancellationToken token)
         {
             var ms = new MemoryStream();
@@ -421,7 +421,7 @@ namespace Project_check_URL
         {
             string[] lines = headerBlock.Split(new[] { "\r\n" }, StringSplitOptions.None);
 
-            // Dòng trạng thái: "HTTP/1.1 200 OK"
+            // Строка статуса: "HTTP/1.1 200 OK"
             string[] parts = lines[0].Split(new[] { ' ' }, 3);
             int code;
             if (parts.Length < 2 || !parts[0].StartsWith("HTTP/", StringComparison.OrdinalIgnoreCase)
@@ -437,28 +437,28 @@ namespace Project_check_URL
             for (int i = 1; i < lines.Length; i++)
             {
                 int idx = lines[i].IndexOf(':');
-                if (idx <= 0) continue;                           // bỏ qua dòng lỗi hoặc dòng gập (folded)
+                if (idx <= 0) continue;                           // пропускаем ошибочные или свёрнутые (folded) строки
 
                 string name = lines[i].Substring(0, idx).Trim();
                 string value = lines[i].Substring(idx + 1).Trim();
 
                 string existing;
                 if (resp.Headers.TryGetValue(name, out existing))
-                    value = existing + ", " + value;              // header lặp lại thì nối bằng ", "
+                    value = existing + ", " + value;              // повторяющийся заголовок объединяем через ", "
 
                 resp.Headers[name] = Limit(value);
             }
             return resp;
         }
 
-        // ===== IP có phải địa chỉ công khai không =====
+        // ===== Является ли IP публичным адресом =====
         internal static bool IsPublicAddress(IPAddress ip)
         {
             byte[] b = ip.GetAddressBytes();
 
             if (ip.AddressFamily == AddressFamily.InterNetworkV6)
             {
-                // ::ffff:a.b.c.d -> kiểm tra như IPv4
+                // ::ffff:a.b.c.d -> проверяем как IPv4
                 bool mapped = true;
                 for (int i = 0; i < 10; i++) if (b[i] != 0) { mapped = false; break; }
                 if (mapped && b[10] == 0xFF && b[11] == 0xFF)
@@ -468,12 +468,12 @@ namespace Project_check_URL
                 if (ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal || ip.IsIPv6Multicast) return false;
                 if ((b[0] & 0xFE) == 0xFC) return false;                      // fc00::/7
 
-                // ::/96 (IPv4-compatible, đã lỗi thời)
+                // ::/96 (IPv4-compatible, устаревший)
                 bool first12Zero = true;
                 for (int i = 0; i < 12; i++) if (b[i] != 0) { first12Zero = false; break; }
                 if (first12Zero) return false;
 
-                // 64:ff9b::/96 (NAT64): kiểm tra IPv4 nhúng ở 4 byte cuối
+                // 64:ff9b::/96 (NAT64): проверяем встроенный IPv4 в последних 4 байтах
                 if (b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xFF && b[3] == 0x9B)
                 {
                     bool nat64 = true;
@@ -482,11 +482,11 @@ namespace Project_check_URL
                         return IsPublicAddress(new IPAddress(new[] { b[12], b[13], b[14], b[15] }));
                 }
 
-                // 2002::/16 (6to4): IPv4 nhúng ở byte 2..5
+                // 2002::/16 (6to4): IPv4 встроен в байты 2..5
                 if (b[0] == 0x20 && b[1] == 0x02)
                     return IsPublicAddress(new IPAddress(new[] { b[2], b[3], b[4], b[5] }));
 
-                // 2001::/32 (Teredo) và 2001:db8::/32 (tài liệu)
+                // 2001::/32 (Teredo) и 2001:db8::/32 (документация)
                 if (b[0] == 0x20 && b[1] == 0x01 && b[2] == 0x00 && b[3] == 0x00) return false;
                 if (b[0] == 0x20 && b[1] == 0x01 && b[2] == 0x0D && b[3] == 0xB8) return false;
 
@@ -494,7 +494,7 @@ namespace Project_check_URL
             }
 
             if (b[0] == 0 || b[0] == 10 || b[0] == 127) return false;
-            if (b[0] == 169 && b[1] == 254) return false;                       // link-local, metadata cloud
+            if (b[0] == 169 && b[1] == 254) return false;                       // link-local, метаданные облака
             if (b[0] == 172 && b[1] >= 16 && b[1] <= 31) return false;
             if (b[0] == 192 && b[1] == 168) return false;
             if (b[0] == 100 && b[1] >= 64 && b[1] <= 127) return false;        // CGNAT

@@ -4,14 +4,14 @@ using System.Linq;
 
 namespace Project_check_URL.View
 {
-    // Dựng nội dung chi tiết (các dòng "nhãn: giá trị") cho từng mục kiểm tra.
-    // HomeView gọi các hàm này rồi gán vào CheckItem.Details; DetailView chỉ việc hiển thị.
+    // Формирует содержимое деталей (строки "метка: значение") для каждого пункта проверки.
+    // HomeView вызывает эти методы и присваивает результат CheckItem.Details; DetailView только отображает.
     internal static class CheckDetails
     {
         private const string TimeFormat = "yyyy-MM-dd HH:mm:ss";
 
         // ================================================================
-        // Dùng chung
+        // Общее
         // ================================================================
 
         private static DetailLine Heading(string text)
@@ -48,7 +48,7 @@ namespace Project_check_URL.View
         }
 
         // ================================================================
-        // 1) Offline: phân tích đường link và tên miền
+        // 1) Offline: анализ ссылки и домена
         // ================================================================
 
         public static List<DetailLine> ForProtocol(Uri uri)
@@ -96,7 +96,7 @@ namespace Project_check_URL.View
             return d;
         }
 
-        // Punycode / Mixed writing systems / Brand impersonation
+        // Punycode / Смешанные системы письма / Имитация бренда
         public static List<DetailLine> ForHomograph(Uri uri, CheckFinding f)
         {
             var d = new List<DetailLine>();
@@ -164,7 +164,7 @@ namespace Project_check_URL.View
             return d;
         }
 
-        // Liệt kê các ký tự ngoài ASCII kèm mã Unicode, để thấy chính xác ký tự nào đáng ngờ
+        // Перечисляет не-ASCII символы с кодами Unicode, чтобы точно видеть подозрительные символы
         private static string NonAscii(string text)
         {
             var seen = new HashSet<int>();
@@ -184,7 +184,7 @@ namespace Project_check_URL.View
                 }
 
                 if (cp <= 127) continue;
-                if (cp >= 0xD800 && cp <= 0xDFFF) continue;     // surrogate lẻ
+                if (cp >= 0xD800 && cp <= 0xDFFF) continue;     // одиночный суррогат
                 if (seen.Add(cp))
                     list.Add(char.ConvertFromUtf32(cp) + " (U+" + cp.ToString("X4") + ")");
             }
@@ -255,7 +255,7 @@ namespace Project_check_URL.View
             AddEngineNames(d, r, "harmless", "Harmless");
             AddEngineNames(d, r, "undetected", "Undetected");
 
-            // các loại còn lại: timeout, failure, type-unsupported...
+            // остальные типы: timeout, failure, type-unsupported...
             List<EngineResult> other = r.Engines
                 .Where(e => e.Category != "malicious" && e.Category != "suspicious"
                          && e.Category != "harmless" && e.Category != "undetected")
@@ -283,13 +283,13 @@ namespace Project_check_URL.View
         }
 
         // ================================================================
-        // 2B) VirusTotal chi tiết, dữ liệu từ VT_response.cs (VtReport / VtVerdict)
+        // 2B) VirusTotal подробно, данные из VT_response.cs (VtReport / VtVerdict)
         //
-        // Phân chia trách nhiệm để không lặp nội dung:
-        //  - Kết luận chung (Level, Finding, Assessment) do HomeView gán vào CheckItem;
-        //    DetailView hiện Assessment ở hộp ASSESSMENT của thẻ, nên Details KHÔNG lặp lại.
-        //  - Blacklist  : engine nào gắn cờ và nhãn đó nghĩa là gì.
-        //  - Reputation : engine nào xếp harmless / undetected, độ phủ.
+        // Разделение ответственности, чтобы не дублировать содержимое:
+        //  - Общий вывод (Level, Finding, Assessment) присваивается HomeView в CheckItem;
+        //    DetailView показывает Assessment в блоке ASSESSMENT карточки, поэтому Details НЕ дублирует его.
+        //  - Blacklist  : какие движки отметили и что означает эта метка.
+        //  - Reputation : какие движки отнесли к harmless / undetected, охват.
         // ================================================================
 
         private static List<DetailLine> VtHeader(VtReport r)
@@ -321,7 +321,7 @@ namespace Project_check_URL.View
             return d;
         }
 
-        // BLACKLIST: engine gắn cờ malicious / suspicious, kèm nghĩa của nhãn
+        // BLACKLIST: движки, отметившие malicious / suspicious, со значением метки
         public static List<DetailLine> ForBlacklist(VtReport r, VtVerdict verdict)
         {
             List<DetailLine> d = VtHeader(r);
@@ -356,7 +356,7 @@ namespace Project_check_URL.View
             return d;
         }
 
-        // REPUTATION: engine harmless / undetected / loại khác (timeout...)
+        // REPUTATION: движки harmless / undetected / прочие (timeout...)
         public static List<DetailLine> ForReputation(VtReport r)
         {
             List<DetailLine> d = VtHeader(r);
@@ -402,7 +402,7 @@ namespace Project_check_URL.View
         }
 
         // ================================================================
-        // 3) HTML check: phản hồi của máy chủ
+        // 3) HTML check: ответ сервера
         // ================================================================
 
         private static readonly HashSet<string> ExecutableTypes =
@@ -423,7 +423,7 @@ namespace Project_check_URL.View
                 ".dmg", ".pkg", ".sh", ".app", ".dll", ".sys", ".reg"
             };
 
-        // Lấy tên file từ URL cuối cùng; nếu chưa có thì dùng URL ban đầu.
+        // Берёт имя файла из конечного URL; если его нет — из исходного URL.
         private static string UrlFileName(HttpProbeResult p)
         {
             if (p == null)
@@ -450,7 +450,7 @@ namespace Project_check_URL.View
             return System.IO.Path.GetFileName(path);
         }
 
-        // Đọc filename / filename* trong Content-Disposition.
+        // Читает filename / filename* из Content-Disposition.
         private static string DispositionFileName(HttpProbeResult p)
         {
             if (p == null || p.Headers == null)
@@ -495,7 +495,7 @@ namespace Project_check_URL.View
             return null;
         }
 
-        // Kiểm tra mọi phần mở rộng để bắt cả tên giả dạng như setup.exe.pdf.
+        // Проверяет все расширения, чтобы поймать и маскировку вроде setup.exe.pdf.
         private static bool HasExecutableExtension(string fileName)
         {
             if (string.IsNullOrWhiteSpace(fileName))
@@ -503,7 +503,7 @@ namespace Project_check_URL.View
 
             string name = fileName.Trim().Trim('"');
 
-            // Loại bỏ đường dẫn nếu máy chủ gửi cả đường dẫn trong filename.
+            // Убираем путь, если сервер прислал его вместе с filename.
             name = name.Replace('\\', '/');
             int slash = name.LastIndexOf('/');
             if (slash >= 0)
@@ -520,7 +520,7 @@ namespace Project_check_URL.View
             return false;
         }
 
-        // Đánh giá loại nội dung mà máy chủ trả về.
+        // Оценивает тип содержимого, возвращаемого сервером.
         public static string ContentTypeLevel(HttpProbeResult p)
         {
             if (p == null)
@@ -528,7 +528,7 @@ namespace Project_check_URL.View
 
             string type = (p.ContentType ?? string.Empty).Trim();
 
-            // Content-Type có thể kèm tham số, ví dụ "; charset=utf-8".
+            // Content-Type может содержать параметры, например "; charset=utf-8".
             int parameterIndex = type.IndexOf(';');
             string mediaType = parameterIndex >= 0
                 ? type.Substring(0, parameterIndex).Trim()
@@ -571,7 +571,7 @@ namespace Project_check_URL.View
             return "Warning";
         }
 
-        // Đánh giá toàn bộ chuỗi redirect, không chỉ HTTP status cuối cùng.
+        // Оценивает всю цепочку редиректов, а не только финальный HTTP-статус.
         public static string RedirectsLevel(HttpProbeResult p)
         {
             if (p == null || !string.IsNullOrEmpty(p.Error)
@@ -600,14 +600,14 @@ namespace Project_check_URL.View
                     return "Warning";
                 }
 
-                // HTTPS chuyển xuống HTTP làm giảm mức bảo vệ kết nối.
+                // Понижение HTTPS до HTTP снижает защиту соединения.
                 if (previous.Scheme == Uri.UriSchemeHttps
                     && next.Scheme == Uri.UriSchemeHttp)
                 {
                     return "Warning";
                 }
 
-                // Chuyển sang hostname khác cần được người dùng chú ý.
+                // Переход на другое имя хоста требует внимания пользователя.
                 if (!string.Equals(
                     previous.IdnHost,
                     next.IdnHost,
@@ -617,7 +617,7 @@ namespace Project_check_URL.View
                 }
             }
 
-            // Chỉ coi 2xx là phản hồi thành công cuối cùng.
+            // Только 2xx считается успешным финальным ответом.
             return p.StatusCode >= 200 && p.StatusCode < 300
                 ? "Safe"
                 : "Warning";
@@ -633,8 +633,6 @@ namespace Project_check_URL.View
                 : "No response"));
             d.Add(new DetailLine("Redirects followed",
                    Math.Max(0, p.RedirectChain.Count - 1) + "  (limit 5)"));
-            d.Add(new DetailLine("Redirect security assessment",
-                RedirectsLevel(p)));
             d.Add(new DetailLine("Note",
                 "A change of host or HTTPS-to-HTTP downgrade is treated as a warning."));
             d.Add(new DetailLine("Redirect security assessment",
@@ -712,7 +710,7 @@ namespace Project_check_URL.View
                 shown.Add(name);
             }
 
-            // Phân tích tên file từ URL và Content-Disposition
+            // Разбор имени файла из URL и Content-Disposition
             string urlName = UrlFileName(p);
             string dispositionName = DispositionFileName(p);
 
@@ -728,7 +726,7 @@ namespace Project_check_URL.View
                     ? "Yes"
                     : "No"));
 
-            // Thông tin phản hồi
+            // Информация об ответе
             d.Add(new DetailLine("Page body",
                 "Not downloaded. Only the response headers are read."));
 
@@ -737,7 +735,7 @@ namespace Project_check_URL.View
             if (p.Error != null)
                 d.Add(new DetailLine("Error", p.Error));
 
-            // Các HTTP header còn lại
+            // Остальные HTTP-заголовки
             List<KeyValuePair<string, string>> rest =
                 p.Headers
                     .Where(h => !shown.Contains(h.Key))

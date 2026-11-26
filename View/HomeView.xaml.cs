@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.Remoting.Activation;
-using System.Threading;                         // [MỚI] cho CancellationTokenSource
+using System.Threading;                         // [НОВОЕ] для CancellationTokenSource
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -18,8 +18,8 @@ namespace Project_check_URL.View
         public string Url { get; set; }
         public List<CheckItem> Items { get; set; }
     }
-    // Một dòng "nhãn: giá trị" trong phần chi tiết của một mục kiểm tra.
-    // Value == null thì dòng này là tiêu đề nhóm (vd "Flagged as malicious (3)").
+    // Одна строка "метка: значение" в разделе деталей пункта проверки.
+    // Value == null — строка является заголовком группы (например "Flagged as malicious (3)").
     public class DetailLine
     {
         public DetailLine(string label, string value)
@@ -52,16 +52,16 @@ namespace Project_check_URL.View
             set { _level = value; OnPropertyChanged(); }
         }
 
-        // Đánh giá riêng của mục này (nếu có), hiện ở hộp ASSESSMENT của màn hình Detail.
-        // Để trống thì Detail dùng lời khuyên chung theo Level.
+        // Собственная оценка этого пункта (если есть), отображается в блоке ASSESSMENT экрана Detail.
+        // Если пусто, Detail использует общую рекомендацию по Level.
         public string Assessment
         {
             get { return _assessment; }
             set { _assessment = value; OnPropertyChanged(); }
         }
 
-        // Nội dung chi tiết (những gì đã tải và kiểm tra được) cho màn hình Detail.
-        // Gán lại cả danh sách khi có kết quả mới để DetailView tự cập nhật.
+        // Подробное содержимое (что удалось загрузить и проверить) для экрана Detail.
+        // При новом результате список присваивается целиком, чтобы DetailView обновился автоматически.
         public List<DetailLine> Details
         {
             get { return _details; }
@@ -77,8 +77,8 @@ namespace Project_check_URL.View
 
     public partial class HomeView : UserControl
     {
-        private API_request _api;     // tạo lười, lần quét đầu tiên
-        private int _checkId;         // đánh số mỗi lần kiểm tra, để bỏ kết quả cũ
+        private API_request _api;     // создаётся лениво, при первой проверке
+        private int _checkId;         // нумерация каждой проверки, чтобы отбрасывать устаревшие результаты
 
         private API_request GetApi()
         {
@@ -94,9 +94,9 @@ namespace Project_check_URL.View
         private string _lastUrl;
         private List<CheckItem> _lastItems;
 
-        private bool _checking;   // đang đợi kiểm tra mạng
+        private bool _checking;   // идёт ожидание проверки сети
 
-        private CancellationTokenSource _netCts;   // [MỚI] dùng để chống rung (debounce)
+        private CancellationTokenSource _netCts;   // [НОВОЕ] для защиты от дребезга (debounce)
         private CancellationTokenSource _scanCts;
 
         // True when the switch is ON (online checks allowed)
@@ -219,7 +219,7 @@ namespace Project_check_URL.View
 
             int myId = ++_checkId;
 
-            // Hủy lần quét trước nếu còn đang chạy
+            // Отменяем предыдущее сканирование, если оно ещё выполняется
             _scanCts?.Cancel();
             _scanCts = null;
 
@@ -289,42 +289,42 @@ namespace Project_check_URL.View
                 items.Add(blacklist);
             }
 
-            // 3) Hiển thị kết quả Offline Check
+            // 3) Показываем результаты Offline Check
             _lastUrl = input;
             _lastItems = items;
             ShowResult(items, input);
 
-            // 4) KIỂM TRA DANGER: DỪNG TOÀN BỘ QUÁ TRÌNH
+            // 4) ПРОВЕРКА DANGER: ОСТАНАВЛИВАЕМ ВЕСЬ ПРОЦЕСС
             bool offlineDanger = items.Any(i => i.Level == "Danger");
 
             if (offlineDanger)
             {
                 StatusText.Text = "Blocked: Offline Check detected a dangerous URL.";
 
-                // Không chạy VirusTotal
-                // Không chạy HTTP Online Check
-                // Không tạo tác vụ mạng mới
+                // Не запускаем VirusTotal
+                // Не запускаем HTTP Online Check
+                // Не создаём новых сетевых задач
                 return;
             }
 
-            // 5) Chỉ tiếp tục Online Check nếu Offline Check không có Danger
+            // 5) Продолжаем Online Check, только если Offline Check не нашёл Danger
             StatusText.Text = "Checked: " + uri.Host +
                               (OnlineMode ? " - scanning online..." : " (offline)");
 
             if (!OnlineMode) return;
 
-            // Hủy lần quét trước nếu vẫn đang chạy
+            // Отменяем предыдущее сканирование, если оно ещё выполняется
             _scanCts?.Cancel();
 
-            // Tạo token riêng cho lần quét hiện tại
+            // Создаём отдельный токен для текущего сканирования
             var scanCts = new CancellationTokenSource();
             _scanCts = scanCts;
 
             bool[] ok;
             try
             {
-                // VirusTotal (chậm, có thể hơn 1 phút) và thăm dò HTTP chạy song song:
-                // cái nào xong trước thì điền trước, cái này lỗi không làm mất kết quả cái kia
+                // VirusTotal (медленно, может занимать более минуты) и HTTP-проверка выполняются параллельно:
+                // что завершилось раньше — заполняется раньше, ошибка одного не уничтожает результат другого
                 ok = await Task.WhenAll(
                     FillVirusTotalAsync(input, myId, reputation, blacklist),
                     FillHttpAsync(input, myId, scanCts.Token, redirects, contentType));
@@ -337,7 +337,7 @@ namespace Project_check_URL.View
                 scanCts.Dispose();
             }
 
-            if (myId != _checkId) return;   // người dùng đã Clear hoặc kiểm tra link khác
+            if (myId != _checkId) return;   // пользователь нажал Clear или проверил другую ссылку
 
             StatusText.Text = ok.All(x => x)
                 ? "Checked: " + uri.Host
@@ -345,18 +345,18 @@ namespace Project_check_URL.View
             UpdateVerdict(items);
         }
 
-        // Quét VirusTotal rồi điền vào hàng Reputation và Blacklist. Trả về false nếu lỗi.
-        //  - HomeView nhận kết luận chung: Finding + Level (từ VtVerdict).
-        //  - DetailView nhận Assessment và Details (từ VtReport / VtVerdict).
+        // Сканирует VirusTotal и заполняет строки Reputation и Blacklist. Возвращает false при ошибке.
+        //  - HomeView получает общий вывод: Finding + Level (из VtVerdict).
+        //  - DetailView получает Assessment и Details (из VtReport / VtVerdict).
         private async Task<bool> FillVirusTotalAsync(string url, int myId, CheckItem reputation, CheckItem blacklist)
         {
             try
             {
                 ScanResult r = await GetApi().ScanUrlAsync(url);
 
-                if (myId != _checkId) return true;   // kết quả cũ, bỏ
+                if (myId != _checkId) return true;   // устаревший результат, отбрасываем
 
-                // JSON gốc đã được API_request lưu vào RAM: phân tích chi tiết bằng VT_response
+                // Исходный JSON уже сохранён API_request в RAM: разбираем детально через VT_response
                 VtReport report = null;
                 VtVerdict verdict = null;
                 try
@@ -377,13 +377,13 @@ namespace Project_check_URL.View
 
                 if (verdict != null)
                 {
-                    // Blacklist: kết luận chung lấy từ verdict để Home và Detail luôn khớp nhau
+                    // Blacklist: общий вывод берётся из verdict, чтобы Home и Detail всегда совпадали
                     blacklist.Finding = verdict.Finding;
                     blacklist.Level = CardLevel(verdict.Level);
                     blacklist.Assessment = verdict.Assessment;
                     blacklist.Details = CheckDetails.ForBlacklist(report, verdict);
 
-                    // Reputation: có engine gắn cờ, hoặc độ phủ quá thấp (verdict Unknown) thì không báo Safe
+                    // Reputation: если есть срабатывания движков или охват слишком низкий (verdict Unknown), не сообщаем Safe
                     reputation.Finding = report.Harmless + " harmless, " + report.Undetected + " undetected";
                     reputation.Level = (report.Malicious + report.Suspicious) > 0 || verdict.Level == "Unknown"
                         ? "Warning" : "Safe";
@@ -392,7 +392,7 @@ namespace Project_check_URL.View
                 }
                 else
                 {
-                    // Không có JSON gốc hoặc không đọc được: dùng số liệu tóm tắt từ API_request
+                    // Нет исходного JSON или он не читается: используем сводные данные из API_request
                     int total = r.Malicious + r.Suspicious + r.Harmless + r.Undetected;
 
                     blacklist.Finding = r.Malicious + " malicious, " + r.Suspicious + " suspicious (of " + total + " engines)";
@@ -418,13 +418,13 @@ namespace Project_check_URL.View
             }
         }
 
-        // Giao diện chỉ có 3 mức Safe / Warning / Danger; "Unknown" của verdict hiện như Warning
+        // В интерфейсе только 3 уровня Safe / Warning / Danger; "Unknown" вердикта показывается как Warning
         private static string CardLevel(string level)
         {
             return (level == "Safe" || level == "Danger") ? level : "Warning";
         }
 
-        // Thăm dò HTTP (không tải body) rồi điền vào hàng Redirects và Content-Type. Trả về false nếu lỗi.
+        // HTTP-проверка (без загрузки тела) и заполнение строк Redirects и Content-Type. Возвращает false при ошибке.
         private async Task<bool> FillHttpAsync(string url, int myId, CancellationToken token,
                                                CheckItem redirects, CheckItem contentType)
         {
@@ -432,10 +432,10 @@ namespace Project_check_URL.View
             {
                 HttpProbeResult p = await ClientMng.RunAsync(url, token);
 
-                if (myId != _checkId) return true;   // kết quả cũ, bỏ
+                if (myId != _checkId) return true;   // устаревший результат, отбрасываем
 
-                // Redirects: giữ cách hiển thị cũ (mã trạng thái). Nếu không nhận được phản hồi
-                // hợp lệ thì báo lỗi thay vì hiện "0 / Safe".
+                // Redirects: сохраняем прежнее отображение (код статуса). Если корректный ответ
+                // не получен, сообщаем об ошибке вместо "0 / Safe".
                 if (p.Error != null)
                 {
                     redirects.Finding = p.Error;
@@ -448,7 +448,7 @@ namespace Project_check_URL.View
                 }
                 redirects.Details = CheckDetails.ForRedirects(p);
 
-                // Content-Type (thay cho hàng SSL cũ)
+                // Content-Type (заменяет прежнюю строку SSL)
                 if (p.ContentType == null)
                 {
                     contentType.Finding = p.Error != null ? "Unavailable: " + p.Error : "Not provided";
@@ -475,15 +475,15 @@ namespace Project_check_URL.View
             }
         }
 
-        // Gom phần hiển thị + verdict để gọi lại sau khi có kết quả online
+        // Собирает отображение и вердикт для повторного вызова после получения онлайн-результатов
         private void ShowResult(List<CheckItem> items, string input)
         {
             ResultGrid.ItemsSource = items;
             CheckedUrlText.Text = input;
             UpdateVerdict(items);
 
-            // Có kết quả: ẩn phần tiêu đề để bảng kết quả chiếm gần hết màn hình,
-            // ô nhập URL nằm gọn phía trên và sẽ cuộn lên cùng trang khi lăn chuột.
+            // Есть результат: скрываем заголовок, чтобы таблица результатов занимала почти весь экран,
+            // поле ввода URL остаётся сверху и прокручивается вместе со страницей при прокрутке колесом.
             HeroText.Visibility = Visibility.Collapsed;
             EmptyHint.Visibility = Visibility.Collapsed;
             PipelineOverview.Visibility = Visibility.Collapsed;
@@ -491,14 +491,14 @@ namespace Project_check_URL.View
             PageScroll.ScrollToTop();
         }
 
-        // DataGrid nuốt sự kiện lăn chuột; chuyển nó cho ScrollViewer của cả trang
+        // DataGrid перехватывает событие прокрутки колесом; передаём его ScrollViewer всей страницы
         private void ResultGrid_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
         {
             PageScroll.ScrollToVerticalOffset(PageScroll.VerticalOffset - e.Delta * 0.8);
             e.Handled = true;
         }
 
-        // Mỗi bước gồm các tiêu chí (Criterion) của nó
+        // Каждый шаг содержит свои критерии (Criterion)
         private static readonly string[][] StepCriteria =
 {
     new[] { "Protocol", "Domain", "Punycode (IDN)", "Mixed writing systems", "Brand impersonation", "IP address" }, // Offline
@@ -522,7 +522,7 @@ namespace Project_check_URL.View
             {
                 List<CheckItem> step = items.Where(i => StepCriteria[s].Contains(i.Criterion)).ToList();
 
-                if (step.Count == 0)                                  // chế độ offline: không chạy bước này
+                if (step.Count == 0)                                  // офлайн-режим: шаг не выполняется
                 {
                     labels[s].Text = "Not run";
                     labels[s].Foreground = Hex("#668BA4");
@@ -538,7 +538,7 @@ namespace Project_check_URL.View
                 }
 
                 int warn = step.Count(i => i.Level == "Warning");
-                bool stepWarn = warn * 2 >= step.Count;               // warning >= 50% số tiêu chí
+                bool stepWarn = warn * 2 >= step.Count;               // warning >= 50% критериев
                 if (stepWarn) warnSteps++;
 
                 string status = step.Any(i => i.Level == "Danger") ? "Danger"
@@ -599,7 +599,7 @@ namespace Project_check_URL.View
             });
 
         }
-        // Xuất toàn bộ kết quả (mọi thẻ ở trạng thái đã mở) ra file HTML
+        // Экспорт всех результатов (все карточки в открытом состоянии) в HTML-файл
         private void Export_Click(object sender, RoutedEventArgs e)
         {
             ExportCommand.Run(_lastUrl, _lastItems, msg => StatusText.Text = msg);

@@ -11,8 +11,8 @@ using System.Windows.Threading;
 namespace Project_check_URL.View
 {
     // ------------------------------------------------------------------
-    // Một dòng kiểm tra trong trang chi tiết. Bao quanh CheckItem của trang Home,
-    // nên khi kết quả online về sau (Finding/Level đổi) thẻ tự cập nhật theo.
+    // Одна строка проверки на странице деталей. Оборачивает CheckItem со страницы Home,
+    // поэтому при поступлении онлайн-результата (изменение Finding/Level) карточка обновляется сама.
     // ------------------------------------------------------------------
     public class DetailEntry : INotifyPropertyChanged
     {
@@ -58,7 +58,7 @@ namespace Project_check_URL.View
             }
         }
 
-        // Những gì đã tải và kiểm tra được cho mục này (hiện khi bấm vào thẻ)
+        // Что удалось загрузить и проверить для этого пункта (показывается при нажатии на карточку)
         public List<DetailLine> Details
         {
             get { return _item.Details; }
@@ -74,8 +74,8 @@ namespace Project_check_URL.View
             get { return DetailView.AboutFor(Criterion); }
         }
 
-        // Đánh giá riêng của mục này (vd verdict của VirusTotal) nếu có,
-        // không thì dùng lời khuyên chung theo mức độ
+        // Собственная оценка этого пункта (например, вердикт VirusTotal), если есть,
+        // иначе общая рекомендация по уровню
         public string Advice
         {
             get
@@ -85,14 +85,14 @@ namespace Project_check_URL.View
             }
         }
 
-        // thẻ đang được chọn (mở rộng, nổi lên)
+        // карточка выбрана (развёрнута, выдвинута вперёд)
         public bool IsSelected
         {
             get { return _isSelected; }
             set { if (_isSelected != value) { _isSelected = value; Raise(); } }
         }
 
-        // có thẻ khác đang được chọn: thẻ này mờ đi
+        // выбрана другая карточка: эта затемняется
         public bool IsDimmed
         {
             get { return _isDimmed; }
@@ -116,7 +116,7 @@ namespace Project_check_URL.View
     }
 
     // ------------------------------------------------------------------
-    // Một nhóm kiểm tra (Static / VirusTotal / HTML)
+    // Группа проверок (Static / VirusTotal / HTML)
     // ------------------------------------------------------------------
     public class DetailSection : INotifyPropertyChanged
     {
@@ -151,7 +151,7 @@ namespace Project_check_URL.View
             private set { if (_summary != value) { _summary = value; Raise(); } }
         }
 
-        // mức xấu nhất trong nhóm: Safe / Warning / Danger / None (nhóm trống)
+        // худший уровень в группе: Safe / Warning / Danger / None (группа пуста)
         public string Level
         {
             get { return _level; }
@@ -229,14 +229,14 @@ namespace Project_check_URL.View
             SectionList.ItemsSource = _sections;
             RefreshSummaries();
 
-            // không để CheckItem (sống ở trang Home) giữ tham chiếu tới trang đã đóng
+            // не позволяем CheckItem (живущему на странице Home) держать ссылку на закрытую страницу
             Unloaded += (s, e) =>
             {
                 foreach (DetailEntry en in _all) en.Detach();
             };
         }
 
-        // 0 = static, 1 = VirusTotal, 2 = HTML/HTTP. Mục lạ mặc định vào "static".
+        // 0 = static, 1 = VirusTotal, 2 = HTML/HTTP. Неизвестные пункты по умолчанию попадают в "static".
         internal static int GroupOf(string criterion)
         {
             switch (criterion)
@@ -301,8 +301,8 @@ namespace Project_check_URL.View
             DangerCount.Text = _all.Count(x => x.Level == "Danger") + " Danger";
         }
 
-        // Bấm vào một thẻ: thẻ đó nổi lên và mở đủ nội dung, các thẻ khác mờ đi.
-        // Bấm lại vào thẻ đang mở thì đóng, mọi thẻ trở về bình thường.
+        // Нажатие на карточку: она выдвигается вперёд и раскрывает содержимое, остальные затемняются.
+        // Повторное нажатие на открытую карточку закрывает её, все карточки возвращаются в норму.
         private void Entry_Click(object sender, MouseButtonEventArgs e)
         {
             var header = sender as FrameworkElement;
@@ -322,7 +322,7 @@ namespace Project_check_URL.View
                 entry.IsDimmed = false;
             }
 
-            // đưa cả thẻ (kể cả phần vừa mở ra) vào vùng nhìn thấy
+            // прокручиваем карточку (включая только что раскрытую часть) в видимую область
             var card = header.Parent == null ? null : (header.Parent as FrameworkElement)?.Parent as FrameworkElement;
             if (select && card != null)
             {
@@ -331,7 +331,7 @@ namespace Project_check_URL.View
             }
         }
 
-        // Xuất toàn bộ trang này (mọi thẻ đã mở) ra file HTML. Chạy được cả khi offline.
+        // Экспорт всей страницы (все открытые карточки) в HTML-файл. Работает и офлайн.
         private void Export_Click(object sender, RoutedEventArgs e)
         {
             ExportCommand.Run(_url, _items);

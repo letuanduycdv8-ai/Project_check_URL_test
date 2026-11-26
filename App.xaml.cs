@@ -15,7 +15,7 @@ namespace Project_check_URL
                 MessageBox.Show(reason, "Project check URL",
                     MessageBoxButton.OK, MessageBoxImage.Error);
                 Shutdown(1);
-                return; // không gọi base.OnStartup => không mở cửa sổ nào
+                return; // не вызываем base.OnStartup => ни одно окно не откроется
             }
 #endif
             base.OnStartup(e);
@@ -32,7 +32,7 @@ namespace Project_check_URL
 
                 if (!File.Exists(manifestPath) || !File.Exists(sigPath))
                 {
-                    reason = "Thiếu file integrity.manifest hoặc chữ ký.";
+                    reason = "Missing integrity.manifest or signature file.";
                     return false;
                 }
 
@@ -41,14 +41,14 @@ namespace Project_check_URL
 
                 if (!ManifestVerifier.Verify(manifest, sig))
                 {
-                    reason = "Chữ ký của manifest không hợp lệ.";
+                    reason = "Manifest signature is invalid.";
                     return false;
                 }
 
                 var errors = IntegrityChecker.VerifyFiles(dir, manifest);
                 if (errors.Count > 0)
                 {
-                    reason = "Phát hiện thay đổi:\n" +
+                    reason = "Changes detected:\n" +
                              string.Join("\n", errors.Take(5));
                     return false;
                 }
@@ -56,7 +56,7 @@ namespace Project_check_URL
             }
             catch (Exception ex)
             {
-                reason = "Không thể kiểm tra toàn vẹn: " + ex.Message;
+                reason = "Cannot verify integrity: " + ex.Message;
                 return false;
             }
         }

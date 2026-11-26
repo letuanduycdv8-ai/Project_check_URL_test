@@ -13,7 +13,7 @@ namespace Project_check_URL
     {
         private static readonly HttpClient Http =
             new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-        private static async Task<bool> ProbeAsync(string url, Func<string, bool> isExpected) // chỗ func này là lambda nhận vào string và trả về bool
+        private static async Task<bool> ProbeAsync(string url, Func<string, bool> isExpected) 
         {
             try
             {
@@ -23,7 +23,7 @@ namespace Project_check_URL
                     return isExpected(body);
                 }
             }
-            catch (HttpRequestException) // hết thời gian, DNS lỗi, bị chặn... đều coi là offline, cho trường hợp mạng chập chờn
+            catch (HttpRequestException)
             {
                 return false;
             }

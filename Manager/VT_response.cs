@@ -13,7 +13,7 @@ namespace Project_check_URL
         public string Method { get; set; }
     }
 
-    // Dữ liệu có cấu trúc, trích từ JSON thô của GET /analyses/{id}
+    // Структурированные данные, извлечённые из сырого JSON GET /analyses/{id}
     internal class VtReport
     {
         public string AnalysisId { get; set; }
@@ -31,7 +31,7 @@ namespace Project_check_URL
         public VtReport() { Engines = new List<EngineVerdict>(); }
 
         public bool IsCompleted { get { return Status == "completed"; } }
-        // Báo cáo có sẵn trên VirusTotal (không phải quét mới); AnalysisId do API_request đặt tiền tố "existing-"
+        // Готовый отчёт VirusTotal (не новое сканирование); AnalysisId получает префикс "existing-" от API_request
         public bool IsExisting { get { return AnalysisId != null && AnalysisId.StartsWith("existing-", StringComparison.Ordinal); } }
         public int Responding { get { return Malicious + Suspicious + Harmless; } }
         public int TotalEngines { get { return Responding + Undetected + Timeout; } }
@@ -118,7 +118,7 @@ namespace Project_check_URL
 
     internal static class VtVerdictBuilder
     {
-        // Tên phải khớp key trong "results" của JSON thật, hãy đối chiếu lại
+        // Имена должны совпадать с ключами в "results" реального JSON, сверяйтесь
         private static readonly HashSet<string> Trusted = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "Google Safebrowsing", "Kaspersky", "BitDefender", "ESET", "Sophos",
@@ -131,7 +131,7 @@ namespace Project_check_URL
             var v = new VtVerdict();
             v.Finding = r.Malicious + " malicious, " + r.Suspicious + " suspicious (of " + r.TotalEngines + " engines)";
 
-            // Case 1: chưa quét xong
+            // Случай 1: сканирование ещё не завершено
             if (!r.IsCompleted)
             {
                 v.Level = "Unknown"; v.Confidence = "None";
@@ -148,7 +148,7 @@ namespace Project_check_URL
             string names = Names(bad);
             string timeoutNote = r.Timeout >= 10 ? " " + r.Timeout + " engines did not respond in time." : "";
 
-            // Case 2: Danger
+            // Случай 2: Danger
             if (r.Malicious >= 3 || (r.Malicious >= 1 && trustedHit))
             {
                 v.Level = "Danger"; v.Confidence = "High";
@@ -162,12 +162,12 @@ namespace Project_check_URL
                 return v;
             }
 
-            // Case 3: Warning do 1-2 engine báo malicious, không có engine uy tín
+            // Случай 3: Warning, 1–2 движка сообщили malicious, доверенных движков нет
             if (r.Malicious >= 1)
             {
                 v.Level = "Warning";
                 v.Confidence = r.Malicious == 2 ? "Medium" : "Low";
-                // results[] có thể rỗng dù stats báo có engine gắn cờ: khi đó chỉ nêu số lượng
+                // results[] может быть пустым, хотя stats сообщает о срабатываниях: тогда указываем только количество
                 string who = names.Length > 0 ? names : (r.Malicious == 1 ? "1 engine" : r.Malicious + " engines");
                 v.Assessment = (r.Malicious == 2 ? "Medium" : "Low") + " confidence. Only " + who + " flagged this URL as " + label
                     + (r.Suspicious > 0 ? ", and " + r.Suspicious + " more marked it suspicious" : "")
@@ -175,7 +175,7 @@ namespace Project_check_URL
                 return v;
             }
 
-            // Case 4: Warning do chỉ có suspicious
+            // Случай 4: Warning, только suspicious
             if (r.Suspicious >= 1)
             {
                 v.Level = "Warning"; v.Confidence = "Low";
@@ -184,7 +184,7 @@ namespace Project_check_URL
                 return v;
             }
 
-            // Case 5: không ai gắn cờ nhưng độ phủ thấp
+            // Случай 5: никто не отметил, но охват низкий
             if (r.Responding < MinResponding)
             {
                 v.Level = "Unknown"; v.Confidence = "Low";
@@ -192,7 +192,7 @@ namespace Project_check_URL
                 return v;
             }
 
-            // Case 6: Safe
+            // Случай 6: Safe
             v.Level = "Safe"; v.Confidence = "Medium";
             v.Assessment = "No engine flagged this URL (" + r.Harmless + " reported it as harmless). This lowers the risk but is not a guarantee: new or targeted pages may not be listed yet. Stay careful on pages that ask for a password or payment details." + timeoutNote;
             return v;
@@ -215,13 +215,13 @@ namespace Project_check_URL
             return s;
         }
 
-        // "Engine: nhãn - nghĩa" (dùng cho Reasons)
+        // "Engine: метка - значение" (используется для Reasons)
         private static string Explain(EngineVerdict e)
         {
             return e.Engine + ": " + e.Result + " - " + Meaning(e);
         }
 
-        // Nghĩa của nhãn. VirusTotal không cung cấp lý do chi tiết hơn
+        // Значение метки. VirusTotal не предоставляет более детальной причины
         internal static string Meaning(EngineVerdict e)
         {
             string res = (e.Result ?? "").ToLowerInvariant();
@@ -236,9 +236,9 @@ namespace Project_check_URL
     }
 
     // ------------------------------------------------------------------
-    // Thông tin lấy từ đối tượng URL của VirusTotal (GET /urls/{id}):
-    // điểm cộng đồng, bình chọn, phân loại, lần đầu thấy, số lần gửi...
-    // Mọi trường đều có thể thiếu nên đọc phòng thủ.
+    // Информация из объекта URL VirusTotal (GET /urls/{id}):
+    // репутация сообщества, голоса, категории, первое обнаружение, число отправок...
+    // Все поля могут отсутствовать, поэтому читаем защитно.
     // ------------------------------------------------------------------
     internal class VtUrlInfo
     {
@@ -307,7 +307,7 @@ namespace Project_check_URL
             return info;
         }
 
-        // Những điểm đáng ngại rút ra từ dữ liệu cộng đồng / phân loại. Rỗng nếu không có gì.
+        // Тревожные признаки из данных сообщества / категорий. Пусто, если ничего нет.
         public List<string> RiskReasons()
         {
             var reasons = new List<string>();
@@ -361,7 +361,7 @@ namespace Project_check_URL
         }
     }
 
-    // Kết luận của thẻ "Reputation" (gom một chỗ để test được, HomeView chỉ gán vào CheckItem)
+    // Заключение карточки "Reputation" (собрано в одном месте для тестируемости; HomeView только присваивает в CheckItem)
     internal class ReputationEval
     {
         public string Finding { get; set; }
@@ -372,7 +372,7 @@ namespace Project_check_URL
         {
             var e = new ReputationEval
             {
-                // cách tính cũ giữ nguyên: dùng khi chưa có dữ liệu cộng đồng
+                // старый расчёт сохранён: используется, когда данных сообщества ещё нет
                 Finding = r.Harmless + " harmless, " + r.Undetected + " undetected",
                 Level = (r.Malicious + r.Suspicious) > 0 || v.Level == "Unknown" ? "Warning" : "Safe",
                 Assessment = v.Level == "Unknown" ? v.Assessment : null
@@ -380,7 +380,7 @@ namespace Project_check_URL
 
             if (u == null) return e;
 
-            // "Reputation" trước đây chỉ đếm engine; nay hiện điểm và bình chọn thật của cộng đồng
+            // Раньше "Reputation" только считал движки; теперь показываются реальные баллы и голоса сообщества
             if (u.Reputation.HasValue || u.HasVotes)
             {
                 string score = u.Reputation.HasValue ? "Score " + u.Reputation.Value : "No score";

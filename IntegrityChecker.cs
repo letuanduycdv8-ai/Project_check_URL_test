@@ -13,7 +13,7 @@ namespace Project_check_URL
         {
             var errors = new List<string>();
 
-            // (1) Khai báo HashSet ngay đầu hàm
+            // (1) Объявляем HashSet в начале функции
             var listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             string manifest = System.Text.Encoding.UTF8.GetString(
@@ -63,7 +63,7 @@ namespace Project_check_URL
                         continue;
                     }
 
-                    // (2) Ghi nhận file hợp lệ, đặt SAU khi kiểm tra đường dẫn an toàn
+                    // (2) Отмечаем файл как допустимый, ПОСЛЕ проверки безопасного пути
                     listed.Add(fullPath);
 
                     if (!File.Exists(fullPath))
@@ -99,7 +99,7 @@ namespace Project_check_URL
                 }
             }
 
-            // (3) Quét file lạ, đặt SAU vòng foreach và TRƯỚC return
+            // (3) Ищем посторонние файлы, ПОСЛЕ цикла foreach и ДО return
             var codeExt = new[] { ".exe", ".dll", ".config", ".json" };
             foreach (string f in Directory.EnumerateFiles(
                 root, "*", SearchOption.AllDirectories))

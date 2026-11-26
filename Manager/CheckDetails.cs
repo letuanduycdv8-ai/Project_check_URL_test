@@ -415,25 +415,212 @@ namespace Project_check_URL.View
                 "application/vnd.android.package-archive", "application/x-apple-diskimage"
             };
 
-        // Safe: trang web / văn bản / ảnh. Warning: thiếu header, tải về, hoặc loại tệp khác.
-        // Danger: tệp thực thi hoặc trình cài đặt.
+        private static readonly HashSet<string> ExecutableExtensions =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ".exe", ".msi", ".com", ".scr", ".bat", ".cmd", ".ps1",
+                ".vbs", ".js", ".jse", ".wsf", ".hta", ".jar", ".apk",
+                ".dmg", ".pkg", ".sh", ".app", ".dll", ".sys", ".reg"
+            };
+
+        // Lấy tên file từ URL cuối cùng; nếu chưa có thì dùng URL ban đầu.
+        private static string UrlFileName(HttpProbeResult p)
+        {
+            if (p == null)
+                return null;
+
+            string source = !string.IsNullOrWhiteSpace(p.FinalUrl)
+                ? p.FinalUrl
+                : p.Url;
+
+            Uri uri;
+            if (!Uri.TryCreate(source, UriKind.Absolute, out uri))
+                return null;
+
+            string path;
+            try
+            {
+                path = Uri.UnescapeDataString(uri.AbsolutePath);
+            }
+            catch
+            {
+                path = uri.AbsolutePath;
+            }
+
+            return System.IO.Path.GetFileName(path);
+        }
+
+        // Đọc filename / filename* trong Content-Disposition.
+        private static string DispositionFileName(HttpProbeResult p)
+        {
+            if (p == null || p.Headers == null)
+                return null;
+
+            string value;
+            if (!p.Headers.TryGetValue("Content-Disposition", out value)
+                || string.IsNullOrWhiteSpace(value))
+                return null;
+
+            foreach (string part in value.Split(';'))
+            {
+                string item = part.Trim();
+
+                if (item.StartsWith("filename*=", StringComparison.OrdinalIgnoreCase))
+                {
+                    string encoded = item.Substring(10).Trim().Trim('"');
+
+                    // RFC 5987: charset'language'percent-encoded-value
+                    int firstQuote = encoded.IndexOf('\'');
+                    int secondQuote = firstQuote >= 0
+                        ? encoded.IndexOf('\'', firstQuote + 1)
+                        : -1;
+
+                    if (secondQuote >= 0)
+                        encoded = encoded.Substring(secondQuote + 1);
+
+                    try
+                    {
+                        return Uri.UnescapeDataString(encoded);
+                    }
+                    catch
+                    {
+                        return encoded;
+                    }
+                }
+
+                if (item.StartsWith("filename=", StringComparison.OrdinalIgnoreCase))
+                    return item.Substring(9).Trim().Trim('"');
+            }
+
+            return null;
+        }
+
+        // Kiểm tra mọi phần mở rộng để bắt cả tên giả dạng như setup.exe.pdf.
+        private static bool HasExecutableExtension(string fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName))
+                return false;
+
+            string name = fileName.Trim().Trim('"');
+
+            // Loại bỏ đường dẫn nếu máy chủ gửi cả đường dẫn trong filename.
+            name = name.Replace('\\', '/');
+            int slash = name.LastIndexOf('/');
+            if (slash >= 0)
+                name = name.Substring(slash + 1);
+
+            string[] parts = name.Split('.');
+            for (int i = 1; i < parts.Length; i++)
+            {
+                string extension = "." + parts[i].Trim();
+                if (ExecutableExtensions.Contains(extension))
+                    return true;
+            }
+
+            return false;
+        }
+
+        // Đánh giá loại nội dung mà máy chủ trả về.
         public static string ContentTypeLevel(HttpProbeResult p)
         {
-            string type = (p.ContentType ?? string.Empty).Trim();
-            if (type.Length == 0) return "Warning";
-            if (ExecutableTypes.Contains(type)) return "Danger";
-
-            string disposition;
-            if (p.Headers.TryGetValue("Content-Disposition", out disposition)
-                && disposition.TrimStart().StartsWith("attachment", StringComparison.OrdinalIgnoreCase))
+            if (p == null)
                 return "Warning";
 
-            string t = type.ToLowerInvariant();
-            if (t.StartsWith("text/") || t.StartsWith("image/")
-                || t == "application/xhtml+xml" || t == "application/json")
+            string type = (p.ContentType ?? string.Empty).Trim();
+
+            // Content-Type có thể kèm tham số, ví dụ "; charset=utf-8".
+            int parameterIndex = type.IndexOf(';');
+            string mediaType = parameterIndex >= 0
+                ? type.Substring(0, parameterIndex).Trim()
+                : type;
+
+            string urlName = UrlFileName(p);
+            string downloadName = DispositionFileName(p);
+
+            if (ExecutableTypes.Contains(mediaType)
+                || HasExecutableExtension(urlName)
+                || HasExecutableExtension(downloadName))
+            {
+                return "Danger";
+            }
+
+            string disposition = null;
+            if (p.Headers != null)
+                p.Headers.TryGetValue("Content-Disposition", out disposition);
+
+            if (!string.IsNullOrWhiteSpace(disposition)
+                && disposition.TrimStart().StartsWith(
+                    "attachment", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Warning";
+            }
+
+            if (mediaType.Length == 0)
+                return "Warning";
+
+            string t = mediaType.ToLowerInvariant();
+
+            if (t.StartsWith("text/")
+                || t.StartsWith("image/")
+                || t == "application/xhtml+xml"
+                || t == "application/json")
+            {
                 return "Safe";
+            }
 
             return "Warning";
+        }
+
+        // Đánh giá toàn bộ chuỗi redirect, không chỉ HTTP status cuối cùng.
+        public static string RedirectsLevel(HttpProbeResult p)
+        {
+            if (p == null || !string.IsNullOrEmpty(p.Error)
+                || p.StatusCode < 200 || p.StatusCode >= 400)
+            {
+                return "Warning";
+            }
+
+            if (p.RedirectChain == null)
+                return "Warning";
+
+            for (int i = 1; i < p.RedirectChain.Count; i++)
+            {
+                Uri previous;
+                Uri next;
+
+                if (!Uri.TryCreate(
+                        p.RedirectChain[i - 1],
+                        UriKind.Absolute,
+                        out previous)
+                    || !Uri.TryCreate(
+                        p.RedirectChain[i],
+                        UriKind.Absolute,
+                        out next))
+                {
+                    return "Warning";
+                }
+
+                // HTTPS chuyển xuống HTTP làm giảm mức bảo vệ kết nối.
+                if (previous.Scheme == Uri.UriSchemeHttps
+                    && next.Scheme == Uri.UriSchemeHttp)
+                {
+                    return "Warning";
+                }
+
+                // Chuyển sang hostname khác cần được người dùng chú ý.
+                if (!string.Equals(
+                    previous.IdnHost,
+                    next.IdnHost,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    return "Warning";
+                }
+            }
+
+            // Chỉ coi 2xx là phản hồi thành công cuối cùng.
+            return p.StatusCode >= 200 && p.StatusCode < 300
+                ? "Safe"
+                : "Warning";
         }
 
         public static List<DetailLine> ForRedirects(HttpProbeResult p)
@@ -445,7 +632,15 @@ namespace Project_check_URL.View
                 ? p.StatusCode + (string.IsNullOrEmpty(p.ReasonPhrase) ? "" : " " + p.ReasonPhrase)
                 : "No response"));
             d.Add(new DetailLine("Redirects followed",
-                Math.Max(0, p.RedirectChain.Count - 1) + "  (limit 5)"));
+                   Math.Max(0, p.RedirectChain.Count - 1) + "  (limit 5)"));
+            d.Add(new DetailLine("Redirect security assessment",
+                RedirectsLevel(p)));
+            d.Add(new DetailLine("Note",
+                "A change of host or HTTPS-to-HTTP downgrade is treated as a warning."));
+            d.Add(new DetailLine("Redirect security assessment",
+                RedirectsLevel(p)));
+            d.Add(new DetailLine("Redirect assessment note",
+                "A hostname change or HTTPS-to-HTTP downgrade is treated as a warning."));
             if (p.Error != null)
                 d.Add(new DetailLine("Error", p.Error));
             d.Add(new DetailLine("Checked at", Utc(p.ProbedAt)));
@@ -485,31 +680,75 @@ namespace Project_check_URL.View
         public static List<DetailLine> ForContentType(HttpProbeResult p)
         {
             var d = new List<DetailLine>();
-            d.Add(new DetailLine("Content-Type", p.RawContentType ?? "Not provided by the server"));
-            d.Add(new DetailLine("Media type", p.ContentType ?? "-"));
-            d.Add(new DetailLine("Charset", CharsetOf(p.RawContentType) ?? "Not declared"));
 
-            var shown = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Content-Type" };
-            string[] key = { "Content-Length", "Content-Disposition", "X-Content-Type-Options", "Server" };
+            d.Add(new DetailLine("Content-Type",
+                p.RawContentType ?? "Not provided by the server"));
+
+            d.Add(new DetailLine("Media type",
+                p.ContentType ?? "-"));
+
+            d.Add(new DetailLine("Charset",
+                CharsetOf(p.RawContentType) ?? "Not declared"));
+
+            var shown = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "Content-Type"
+    };
+
+            string[] key =
+            {
+        "Content-Length",
+        "Content-Disposition",
+        "X-Content-Type-Options",
+        "Server"
+    };
+
             foreach (string name in key)
             {
                 string value;
                 bool has = p.Headers.TryGetValue(name, out value);
+
                 d.Add(new DetailLine(name, has ? value : "Not set"));
                 shown.Add(name);
             }
 
-            d.Add(new DetailLine("Page body", "Not downloaded. Only the response headers are read."));
+            // Phân tích tên file từ URL và Content-Disposition
+            string urlName = UrlFileName(p);
+            string dispositionName = DispositionFileName(p);
+
+            d.Add(new DetailLine("URL file name",
+                urlName ?? "Not available"));
+
+            d.Add(new DetailLine("Content-Disposition file name",
+                dispositionName ?? "Not provided"));
+
+            d.Add(new DetailLine("Executable extension detected",
+                HasExecutableExtension(urlName)
+                || HasExecutableExtension(dispositionName)
+                    ? "Yes"
+                    : "No"));
+
+            // Thông tin phản hồi
+            d.Add(new DetailLine("Page body",
+                "Not downloaded. Only the response headers are read."));
+
             d.Add(new DetailLine("Final URL", p.FinalUrl));
+
             if (p.Error != null)
                 d.Add(new DetailLine("Error", p.Error));
 
+            // Các HTTP header còn lại
             List<KeyValuePair<string, string>> rest =
-                p.Headers.Where(h => !shown.Contains(h.Key)).OrderBy(h => h.Key, StringComparer.OrdinalIgnoreCase).ToList();
+                p.Headers
+                    .Where(h => !shown.Contains(h.Key))
+                    .OrderBy(h => h.Key, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
 
             d.Add(Heading("Other response headers (" + rest.Count + ")"));
+
             if (rest.Count == 0)
                 d.Add(new DetailLine("Headers", "None"));
+
             foreach (KeyValuePair<string, string> h in rest)
                 d.Add(new DetailLine(h.Key, h.Value));
 

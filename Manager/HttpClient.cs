@@ -329,7 +329,7 @@ namespace Project_check_URL
                         var ssl = new SslStream(stream, false);
                         stream = ssl;
                         await ssl.AuthenticateAsClientAsync(
-                            GetNetworkHost(uri), null, SslProtocols.Tls12, false).ConfigureAwait(false);
+                            GetNetworkHost(uri), null, SslProtocols.None, false).ConfigureAwait(false);
                         tlsInfo = ssl;
                     }
 

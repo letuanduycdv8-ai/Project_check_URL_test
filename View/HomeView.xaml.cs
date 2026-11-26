@@ -423,7 +423,7 @@ namespace Project_check_URL.View
                 else
                 {
                     redirects.Finding = $"{(int)p.StatusCode} - {p.ReasonPhrase}";
-                    redirects.Level = (300 < p.StatusCode && p.StatusCode < 400) ? "Warning" : "Safe";
+                    redirects.Level = CheckDetails.RedirectsLevel(p);
                 }
                 redirects.Details = CheckDetails.ForRedirects(p);
 

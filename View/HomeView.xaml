@@ -437,7 +437,6 @@
                     </Menu.Resources>
 
                     <MenuItem Header="_File">
-                        <MenuItem Header="_Information more about URL" Click="Show_information"/>
                         <MenuItem Header="_Export report" Click="Export_Click"/>
                         <MenuItem Header="Clear" Click="ClearButton_Click"/>
                         <Separator/>
@@ -445,7 +444,7 @@
                     </MenuItem>
 
                     <MenuItem Header="_View">
-                        <MenuItem Header="_History"/>
+                        <MenuItem Header="_Information more about URL" Click="Show_information"/>
                     </MenuItem>
 
                     <MenuItem Header="_Help">
@@ -491,15 +490,6 @@
 
                                 <Image Source="/Picture/Export.png"  Height="20" Width="Auto"/>
 
-                            </Button>
-
-                            <Button x:Name="Onl_history"
-                                    Style="{StaticResource QuickActionButton}"
-                                    ToolTip="View history"
-                                    MouseEnter="Tool_Enter"
-                                    MouseLeave="Leave"
-                                    Tag="Show the history links URL you had checked">
-                                <Image Source="/Picture/History.jpg"  Height="20" Width="Auto"/>
                             </Button>
 
 

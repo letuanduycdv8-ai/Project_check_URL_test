@@ -191,11 +191,11 @@ namespace Project_check_URL.View
             bool on = OnlineMode;
             OnlineToggle.Content = on ? "Online" : "Offline";
             OnlineCard.Opacity = on ? 1.0 : 0.45;
-            Onl_history.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+            
         }
         private void OnlineToggle_Changed(object sender, RoutedEventArgs e)
         {
-            if (OnlineCard == null || Onl_history == null
+            if (OnlineCard == null
                 || OnlineToggle == null || _checking) return;
 
             ApplyNetworkState();
@@ -252,70 +252,87 @@ namespace Project_check_URL.View
             }
 
             // OnlineCheck
+            // 1. Prepare offline results only
             string localReason = ClientMng.NonPublicTargetReason(uri);
             bool runOnline = OnlineMode && localReason == null;
-            CheckItem redirects = null, reputation = null, contentType = null, blacklist = null;
-            if (runOnline)
-            {
-                redirects = new CheckItem
-                {
-                    Criterion = "Redirects",
-                    Finding = "Scanning...",
-                    Level = "Warning",
-                    Details = CheckDetails.Pending("Waiting for the server to answer...")
-                };
-                reputation = new CheckItem
-                {
-                    Criterion = "Reputation",
-                    Finding = "Scanning...",
-                    Level = "Warning",
-                    Details = CheckDetails.Pending("Waiting for VirusTotal to finish the scan...")
-                };
-                contentType = new CheckItem
-                {
-                    Criterion = "Content-Type",
-                    Finding = "Scanning...",
-                    Level = "Warning",
-                    Details = CheckDetails.Pending("Waiting for the server to answer...")
-                };
-                blacklist = new CheckItem
-                {
-                    Criterion = "Blacklist",
-                    Finding = "Scanning...",
-                    Level = "Warning",
-                    Details = CheckDetails.Pending("Waiting for VirusTotal to finish the scan...")
-                };
-                items.Add(redirects);
-                items.Add(reputation);
-                items.Add(contentType);
-                items.Add(blacklist);
-            }
 
-            // 3) Показываем результаты Offline Check
+            CheckItem redirects = null;
+            CheckItem reputation = null;
+            CheckItem contentType = null;
+            CheckItem blacklist = null;
+
+            // 2. Display Offline Check results first
             _lastUrl = input;
             _lastItems = items;
             ShowResult(items, input);
 
-            // 4) ПРОВЕРКА DANGER: ОСТАНАВЛИВАЕМ ВЕСЬ ПРОЦЕСС
+            // 3. Stop immediately if Offline Check detects Danger
             bool offlineDanger = items.Any(i => i.Level == "Danger");
 
             if (offlineDanger)
             {
-                StatusText.Text = "Blocked: Offline Check detected a dangerous URL.";
+                StatusText.Text =
+                    "Blocked: Offline Check detected a dangerous URL.";
 
-                // Не запускаем VirusTotal
-                // Не запускаем HTTP Online Check
-                // Не создаём новых сетевых задач
                 return;
             }
 
-            // 5) Продолжаем Online Check, только если Offline Check не нашёл Danger
+            // 4. Continue only if Offline Check allows it
             StatusText.Text = "Checked: " + uri.Host +
                    (!OnlineMode ? " (offline)"
-                  : localReason != null ? " (offline only: " + localReason + ", not sent to online services)"
-                  : " - scanning online...");
+                  : localReason != null
+                      ? " (offline only: " + localReason + ", not sent to online services)"
+                      : " - scanning online...");
 
-            if (!runOnline) return;
+            if (!runOnline)
+                return;
+
+            // 5. Create Online Check placeholders only after passing Offline Check
+            redirects = new CheckItem
+            {
+                Criterion = "Redirects",
+                Finding = "Scanning...",
+                Level = "Warning",
+                Details = CheckDetails.Pending(
+                    "Waiting for the server to answer...")
+            };
+
+            reputation = new CheckItem
+            {
+                Criterion = "Reputation",
+                Finding = "Scanning...",
+                Level = "Warning",
+                Details = CheckDetails.Pending(
+                    "Waiting for VirusTotal to finish the scan...")
+            };
+
+            contentType = new CheckItem
+            {
+                Criterion = "Content-Type",
+                Finding = "Scanning...",
+                Level = "Warning",
+                Details = CheckDetails.Pending(
+                    "Waiting for the server to answer...")
+            };
+
+            blacklist = new CheckItem
+            {
+                Criterion = "Blacklist",
+                Finding = "Scanning...",
+                Level = "Warning",
+                Details = CheckDetails.Pending(
+                    "Waiting for VirusTotal to finish the scan...")
+            };
+
+            items.Add(redirects);
+            items.Add(reputation);
+            items.Add(contentType);
+            items.Add(blacklist);
+
+            // Update the interface after adding Online Check items
+            _lastItems = items;
+            ShowResult(items, input);
+
 
             // Отменяем предыдущее сканирование, если оно ещё выполняется
             _scanCts?.Cancel();
@@ -611,7 +628,13 @@ namespace Project_check_URL.View
 
         private void Show_information(object sender, RoutedEventArgs e)
         {
-            MessageBox.Show("Hello");
+            string instructionText = "Инструкция по использованию программы\r\n\r\n1. Введите URL-адрес сайта в поле ввода.\r\n2. Нажмите кнопку «Проверить», чтобы начать анализ.\r\n3. Дождитесь завершения проверки. Программа выполняет:\r\n   - Offline Check — проверку структуры URL, домена и потенциальных признаков подмены.\r\n   - VirusTotal — анализ репутации URL с использованием внешней базы угроз.\r\n   - Online Check — проверку доступности сайта, HTTP-статуса, перенаправлений и характеристик ответа сервера.\r\n4. Просмотрите общий результат проверки и уровень риска.\r\n5. Откройте раздел «Details», чтобы ознакомиться с подробной информацией по каждому этапу анализа.\r\n\r\nВажно: Результат проверки носит информационный характер и не гарантирует абсолютную безопасность сайта. Для работы онлайн-проверки требуется подключение к Интернету.\r\n";
+            MessageBox.Show(
+                instructionText,
+                "Инструкция по использованию",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information
+                );
         }
         private void Tool_Enter(object sender, MouseEventArgs e)
         {

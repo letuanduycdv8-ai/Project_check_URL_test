@@ -252,8 +252,10 @@ namespace Project_check_URL.View
             }
 
             // OnlineCheck
+            string localReason = ClientMng.NonPublicTargetReason(uri);
+            bool runOnline = OnlineMode && localReason == null;
             CheckItem redirects = null, reputation = null, contentType = null, blacklist = null;
-            if (OnlineMode)
+            if (runOnline)
             {
                 redirects = new CheckItem
                 {
@@ -309,9 +311,11 @@ namespace Project_check_URL.View
 
             // 5) Продолжаем Online Check, только если Offline Check не нашёл Danger
             StatusText.Text = "Checked: " + uri.Host +
-                              (OnlineMode ? " - scanning online..." : " (offline)");
+                   (!OnlineMode ? " (offline)"
+                  : localReason != null ? " (offline only: " + localReason + ", not sent to online services)"
+                  : " - scanning online...");
 
-            if (!OnlineMode) return;
+            if (!runOnline) return;
 
             // Отменяем предыдущее сканирование, если оно ещё выполняется
             _scanCts?.Cancel();

@@ -1,0 +1,71 @@
+diff --git a/Manager/HttpClient.cs b/Manager/HttpClient.cs
+index 323bf51..dd99c08 100644
+--- a/Manager/HttpClient.cs
++++ b/Manager/HttpClient.cs
+@@ -289,6 +289,31 @@ namespace Project_check_URL
+         }
+ 
+         // Kiểm tra sớm scheme và IP literal; lớp chặn chính là kiểm tra IP sau khi phân giải ở RunAsync
++        // Địa chỉ trỏ vào chính máy này hoặc mạng nội bộ? Trả về lý do, hoặc null nếu là địa chỉ công khai.
++        // Dùng TRƯỚC khi gửi URL cho dịch vụ bên ngoài (VirusTotal, RDAP): tên máy nội bộ như
++        // "http://hr-portal.local/luong" không nên bị gửi ra ngoài, và dịch vụ ngoài cũng không kiểm tra được chúng.
++        internal static string NonPublicTargetReason(Uri uri)
++        {
++            string host = (uri.DnsSafeHost ?? "").Trim().TrimEnd('.').ToLowerInvariant();
++            if (host.Length == 0) return null;
++
++            IPAddress ip;
++            if (IPAddress.TryParse(host, out ip))
++                return IsPublicAddress(ip) ? null : "private or local IP address";
++
++            if (host == "localhost" || host.EndsWith(".localhost", StringComparison.Ordinal))
++                return "local machine";
++            if (host.IndexOf('.') < 0)
++                return "internal host name";
++            foreach (string suffix in InternalSuffixes)
++                if (host.EndsWith(suffix, StringComparison.Ordinal))
++                    return "internal network name";
++            return null;
++        }
++
++        private static readonly string[] InternalSuffixes =
++            { ".local", ".localdomain", ".internal", ".intranet", ".lan", ".home.arpa", ".corp" };
++
+         internal static string PreCheckTarget(Uri uri)
+         {
+             if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+diff --git a/View/HomeView.xaml.cs b/View/HomeView.xaml.cs
+index 0cc6054..c808243 100644
+--- a/View/HomeView.xaml.cs
++++ b/View/HomeView.xaml.cs
+@@ -246,9 +246,13 @@ namespace Project_check_URL.View
+                 });
+             }
+ 
+-            // OnlineCheck
++            // OnlineCheck. Địa chỉ nội bộ (localhost, IP riêng, tên máy nội bộ) chỉ được kiểm tra offline:
++            // không gửi cho VirusTotal/RDAP và không thăm dò HTTP.
++            string localReason = ClientMng.NonPublicTargetReason(uri);
++            bool runOnline = OnlineMode && localReason == null;
++
+             CheckItem redirects = null, reputation = null, contentType = null, blacklist = null;
+-            if (OnlineMode)
++            if (runOnline)
+             {
+                 redirects = new CheckItem
+                 {
+@@ -288,9 +292,12 @@ namespace Project_check_URL.View
+             _lastUrl = input;
+             _lastItems = items;
+             ShowResult(items, input);
+-            StatusText.Text = "Checked: " + uri.Host + (OnlineMode ? " - scanning online..." : " (offline)");
++            StatusText.Text = "Checked: " + uri.Host +
++                (!OnlineMode ? " (offline)"
++                 : localReason != null ? " (offline only: " + localReason + ", not sent to online services)"
++                 : " - scanning online...");
+ 
+-            if (!OnlineMode) return;
++            if (!runOnline) return;
+ 
+             // Hủy lần quét trước nếu vẫn đang chạy
+             _scanCts?.Cancel();

@@ -252,6 +252,27 @@ namespace Project_check_URL
         }
 
         // Ранняя проверка scheme и IP-литерала; основная блокировка — проверка IP после разрешения в RunAsync
+        internal static string NonPublicTargetReason(Uri uri)
+        {
+            string host = (uri.DnsSafeHost ?? "").Trim().TrimEnd('.').ToLowerInvariant();
+            if (host.Length == 0) return null;
+
+            IPAddress ip;
+            if (IPAddress.TryParse(host, out ip))
+                return IsPublicAddress(ip) ? null : "private or local IP address";
+
+            if (host == "localhost" || host.EndsWith(".localhost", StringComparison.Ordinal))
+                return "local machine";
+            if (host.IndexOf('.') < 0)
+                return "internal host name";
+            foreach (string suffix in InternalSuffixes)
+                if (host.EndsWith(suffix, StringComparison.Ordinal))
+                    return "internal network name";
+            return null;
+        }
+
+        private static readonly string[] InternalSuffixes =
+            { ".local", ".localdomain", ".internal", ".intranet", ".lan", ".home.arpa", ".corp" };
         internal static string PreCheckTarget(Uri uri)
         {
             if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)

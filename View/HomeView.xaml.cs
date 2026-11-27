@@ -324,14 +324,21 @@ namespace Project_check_URL.View
                     "Waiting for VirusTotal to finish the scan...")
             };
 
-            items.Add(redirects);
-            items.Add(reputation);
-            items.Add(contentType);
-            items.Add(blacklist);
+            // Create a new list instead of modifying the list
+            // currently assigned to ResultGrid.ItemsSource.
+            var onlineItems = new List<CheckItem>(items);
 
-            // Update the interface after adding Online Check items
-            _lastItems = items;
-            ShowResult(items, input);
+            onlineItems.Add(redirects);
+            onlineItems.Add(reputation);
+            onlineItems.Add(contentType);
+            onlineItems.Add(blacklist);
+
+            // Save the complete results.
+            _lastItems = onlineItems;
+
+            // Display the new list.
+            ShowResult(onlineItems, input);
+
 
 
             // Отменяем предыдущее сканирование, если оно ещё выполняется
@@ -363,7 +370,7 @@ namespace Project_check_URL.View
             StatusText.Text = ok.All(x => x)
                 ? "Checked: " + uri.Host
                 : "Checked: " + uri.Host + " (some online checks failed)";
-            UpdateVerdict(items);
+            UpdateVerdict(onlineItems);
         }
 
         // Сканирует VirusTotal и заполняет строки Reputation и Blacklist. Возвращает false при ошибке.
@@ -457,16 +464,18 @@ namespace Project_check_URL.View
 
                 // Redirects: сохраняем прежнее отображение (код статуса). Если корректный ответ
                 // не получен, сообщаем об ошибке вместо "0 / Safe".
-                if (p.Error != null)
+
+                if (!string.IsNullOrEmpty(p.Error))
                 {
                     redirects.Finding = p.Error;
-                    redirects.Level = "Warning";
                 }
                 else
                 {
                     redirects.Finding = $"{(int)p.StatusCode} - {p.ReasonPhrase}";
-                    redirects.Level = CheckDetails.RedirectsLevel(p);
                 }
+
+                // Phân loại cả trường hợp redirect bị chặn.
+                redirects.Level = CheckDetails.RedirectsLevel(p);
                 redirects.Details = CheckDetails.ForRedirects(p);
 
                 // Content-Type (заменяет прежнюю строку SSL)
@@ -499,16 +508,18 @@ namespace Project_check_URL.View
         // Собирает отображение и вердикт для повторного вызова после получения онлайн-результатов
         private void ShowResult(List<CheckItem> items, string input)
         {
+            // Detach the old source before assigning the new one.
+            ResultGrid.ItemsSource = null;
             ResultGrid.ItemsSource = items;
+
             CheckedUrlText.Text = input;
             UpdateVerdict(items);
 
-            // Есть результат: скрываем заголовок, чтобы таблица результатов занимала почти весь экран,
-            // поле ввода URL остаётся сверху и прокручивается вместе со страницей при прокрутке колесом.
             HeroText.Visibility = Visibility.Collapsed;
             EmptyHint.Visibility = Visibility.Collapsed;
             PipelineOverview.Visibility = Visibility.Collapsed;
             ResultPanel.Visibility = Visibility.Visible;
+
             PageScroll.ScrollToTop();
         }
 

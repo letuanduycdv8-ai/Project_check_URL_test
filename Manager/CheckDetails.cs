@@ -572,10 +572,36 @@ namespace Project_check_URL.View
         }
 
         // Оценивает всю цепочку редиректов, а не только финальный HTTP-статус.
+
+
         public static string RedirectsLevel(HttpProbeResult p)
         {
-            if (p == null || !string.IsNullOrEmpty(p.Error)
-                || p.StatusCode < 200 || p.StatusCode >= 400)
+            if (p == null)
+                return "Warning";
+
+            // Chỉ Danger khi chương trình chặn tại một bước redirect,
+            // không phải khi URL ban đầu vốn đã là địa chỉ nội bộ.
+            bool isRedirectBlocked =
+                p.RedirectChain != null &&
+                p.RedirectChain.Count > 1 &&
+                !string.IsNullOrEmpty(p.Error) &&
+                (
+                    p.Error.StartsWith(
+                        "Blocked: host is a non-public address",
+                        StringComparison.OrdinalIgnoreCase)
+                    ||
+                    p.Error.StartsWith(
+                        "Blocked: host resolves to a non-public address",
+                        StringComparison.OrdinalIgnoreCase)
+                );
+
+            if (isRedirectBlocked)
+                return "Danger";
+
+            // Các lỗi HTTP/kết nối thông thường vẫn là Warning.
+            if (!string.IsNullOrEmpty(p.Error)
+                || p.StatusCode < 200
+                || p.StatusCode >= 400)
             {
                 return "Warning";
             }
@@ -588,26 +614,22 @@ namespace Project_check_URL.View
                 Uri previous;
                 Uri next;
 
-                if (!Uri.TryCreate(
-                        p.RedirectChain[i - 1],
-                        UriKind.Absolute,
-                        out previous)
-                    || !Uri.TryCreate(
-                        p.RedirectChain[i],
-                        UriKind.Absolute,
-                        out next))
+                if (!Uri.TryCreate(p.RedirectChain[i - 1],
+                        UriKind.Absolute, out previous)
+                    || !Uri.TryCreate(p.RedirectChain[i],
+                        UriKind.Absolute, out next))
                 {
                     return "Warning";
                 }
 
-                // Понижение HTTPS до HTTP снижает защиту соединения.
+                // HTTPS chuyển xuống HTTP.
                 if (previous.Scheme == Uri.UriSchemeHttps
                     && next.Scheme == Uri.UriSchemeHttp)
                 {
                     return "Warning";
                 }
 
-                // Переход на другое имя хоста требует внимания пользователя.
+                // Chuyển sang hostname khác.
                 if (!string.Equals(
                     previous.IdnHost,
                     next.IdnHost,
@@ -617,11 +639,12 @@ namespace Project_check_URL.View
                 }
             }
 
-            // Только 2xx считается успешным финальным ответом.
             return p.StatusCode >= 200 && p.StatusCode < 300
                 ? "Safe"
                 : "Warning";
         }
+
+
 
         public static List<DetailLine> ForRedirects(HttpProbeResult p)
         {
